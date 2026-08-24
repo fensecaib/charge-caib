@@ -1,0 +1,2 @@
+-keep class caib.charge.data.local.** { *; }
+-keepattributes *Annotation*
