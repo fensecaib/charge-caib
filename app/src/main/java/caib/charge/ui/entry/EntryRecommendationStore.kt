@@ -4,10 +4,10 @@ import caib.charge.domain.model.BuiltInCategoryIds
 import caib.charge.domain.model.EntryType
 import caib.charge.domain.repository.LedgerRepository
 import caib.charge.ui.model.UiEntryType
-import caib.charge.ui.model.UiHistoryTemplate
-import caib.charge.ui.model.UiHistoryTemplateKey
-import caib.charge.ui.model.UiHistoryTemplateState
 import caib.charge.ui.model.UiRecentCategoriesState
+import caib.charge.ui.model.UiRecentNoteKey
+import caib.charge.ui.model.UiRecentNoteState
+import caib.charge.ui.model.UiRecentNoteSuggestion
 import caib.charge.ui.model.toDomain
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -28,30 +28,35 @@ internal class EntryRecommendationStore(
     private val ledgerRepository: LedgerRepository,
     private val scope: CoroutineScope,
 ) {
-    private val historyKey = MutableStateFlow<UiHistoryTemplateKey?>(null)
+    private val recentNoteKey = MutableStateFlow<UiRecentNoteKey?>(null)
 
-    val historyState: StateFlow<UiHistoryTemplateState> = historyKey
+    val recentNoteState: StateFlow<UiRecentNoteState> = recentNoteKey
         .flatMapLatest { key ->
             if (key == null) {
-                flowOf(UiHistoryTemplateState())
+                flowOf(UiRecentNoteState())
             } else {
-                ledgerRepository.observeHistoryTemplates(
+                ledgerRepository.observeRecentNotes(
                     type = key.type.toDomain(),
                     categoryId = key.categoryId,
-                    limit = 8,
-                ).map { templates ->
-                    UiHistoryTemplateState(
+                    limit = 10,
+                ).map { suggestions ->
+                    UiRecentNoteState(
                         key = key,
-                        items = templates.map { UiHistoryTemplate(it.amountCents, it.note) },
+                        items = suggestions.map {
+                            UiRecentNoteSuggestion(
+                                note = it.note,
+                                normalizedNote = it.normalizedNote,
+                            )
+                        },
                     )
                 }.onStart {
-                    // StateFlow otherwise retains the previous key's clickable items until Room
-                    // delivers the first value for this key.
-                    emit(UiHistoryTemplateState(key = key))
+                    // StateFlow otherwise retains the previous key's clickable items until the
+                    // repository delivers the first value for this key.
+                    emit(UiRecentNoteState(key = key))
                 }
             }
         }
-        .stateIn(scope, SharingStarted.WhileSubscribed(5_000), UiHistoryTemplateState())
+        .stateIn(scope, SharingStarted.WhileSubscribed(5_000), UiRecentNoteState())
 
     private val recentLock = Any()
     private val recentOverrides = mutableMapOf<UiEntryType, String>()
@@ -76,8 +81,8 @@ internal class EntryRecommendationStore(
         }
     }
 
-    fun setHistoryContext(type: UiEntryType, categoryId: String?) {
-        historyKey.value = categoryId?.let { UiHistoryTemplateKey(type, it) }
+    fun setRecentNoteContext(type: UiEntryType, categoryId: String?) {
+        recentNoteKey.value = categoryId?.let { UiRecentNoteKey(type, it) }
     }
 
     /**

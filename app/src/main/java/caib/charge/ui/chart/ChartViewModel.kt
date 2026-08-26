@@ -6,6 +6,7 @@ import caib.charge.domain.NoteBreakdownCalculator
 import caib.charge.domain.model.Category
 import caib.charge.domain.model.ChartGranularity
 import caib.charge.domain.model.ChartPeriod
+import caib.charge.domain.model.ChartPeriodAxis
 import caib.charge.domain.model.DetailFilter
 import caib.charge.domain.model.EntryType
 import caib.charge.domain.model.LedgerEntry
@@ -20,6 +21,7 @@ import caib.charge.ui.model.UiEntryType
 import caib.charge.ui.model.UiLedgerEntry
 import caib.charge.ui.model.UiNoteBreakdownSlice
 import caib.charge.ui.model.toDomain
+import caib.charge.ui.model.toDomainGranularity
 import caib.charge.ui.model.toUi
 import caib.charge.ui.theme.CategoryPalette
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -38,6 +40,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.onStart
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 
@@ -72,17 +75,17 @@ class ChartViewModel @Inject constructor(
     private val clock: Clock,
 ) : ViewModel() {
     private val today = MutableStateFlow(LocalDate.now(clock))
+    val currentDate: StateFlow<LocalDate> = today.asStateFlow()
     private val initialSelection = ChartSelection(UiEntryType.EXPENSE, UiChartPeriod.MONTH, today.value)
     private val chartControl = MutableStateFlow(ChartControlState(initialSelection))
     private val selection = chartControl.map { it.selection }.distinctUntilChanged()
 
     val chartType = selection.map { it.type }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), UiEntryType.EXPENSE)
     val chartPeriodKind = selection.map { it.period }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), UiChartPeriod.MONTH)
+    val chartPeriodAnchor = selection.map { it.toDomainPeriod().startDate }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), initialSelection.toDomainPeriod().startDate)
     val chartPeriodLabel = selection.map { it.toDomainPeriod().displayLabel() }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "")
-    val chartCanNext = combine(selection, today) { current, date -> current.toDomainPeriod().next().startDate <= date }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
-
     val chartPoints: StateFlow<List<UiChartPoint>> = combine(selection, today) { current, date -> current to date }
         .flatMapLatest { (current, date) ->
             val period = current.toDomainPeriod()
@@ -162,13 +165,15 @@ class ChartViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), UiEntryType.EXPENSE)
     val analysisPeriodKind: StateFlow<UiChartPeriod> = analysisSelection.map { it?.period ?: UiChartPeriod.MONTH }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), UiChartPeriod.MONTH)
+    val analysisPeriodAnchor: StateFlow<LocalDate> = analysisSelection
+        .map { it?.toDomainPeriod()?.startDate ?: ChartPeriod.currentMonth(today.value).startDate }
+        .stateIn(
+            viewModelScope,
+            SharingStarted.WhileSubscribed(5_000),
+            ChartPeriod.currentMonth(today.value).startDate,
+        )
     val analysisPeriodLabel: StateFlow<String> = analysisSelection.map { it?.toDomainPeriod()?.displayLabel().orEmpty() }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "")
-    val analysisCanNext: StateFlow<Boolean> = combine(analysisSelection, today) { current, date ->
-        current?.toDomainPeriod()?.next()?.startDate?.let { start -> start <= date } ?: false
-    }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
-
     private val analysisDomainEntries: StateFlow<List<LedgerEntry>> = analysisSelection
         .flatMapLatest { current ->
             if (current == null) flowOf(emptyList())
@@ -229,30 +234,36 @@ class ChartViewModel @Inject constructor(
 
     fun setChartPeriod(period: UiChartPeriod) {
         chartControl.update { current ->
-            current.copy(selection = current.selection.copy(period = period), selectedPointIndex = null)
-        }
-    }
-
-    fun previousChartPeriod() {
-        chartControl.update { current ->
+            if (period == current.selection.period) return@update current
+            val normalizedAnchor = normalizedPeriodAnchor(
+                period = period,
+                requestedAnchor = current.selection.anchorDate,
+                referenceAnchor = current.selection.anchorDate,
+                today = today.value,
+            )
+                ?: return@update current
             current.copy(
-                selection = current.selection.copy(
-                    anchorDate = current.selection.toDomainPeriod().previous().anchorDate
-                ),
+                selection = current.selection.copy(period = period, anchorDate = normalizedAnchor),
                 selectedPointIndex = null,
             )
         }
     }
 
-    fun nextChartPeriod() {
+    fun selectChartAnchor(anchorDate: LocalDate) {
         chartControl.update { current ->
-            val next = current.selection.toDomainPeriod().next()
+            val normalizedAnchor = normalizedPeriodAnchor(
+                period = current.selection.period,
+                requestedAnchor = anchorDate,
+                referenceAnchor = current.selection.anchorDate,
+                today = today.value,
+            )
+                ?: return@update current
+            if (
+                ChartPeriod(current.selection.period.toDomainGranularity(), normalizedAnchor).startDate ==
+                current.selection.toDomainPeriod().startDate
+            ) return@update current
             current.copy(
-                selection = if (next.startDate <= today.value) {
-                    current.selection.copy(anchorDate = next.anchorDate)
-                } else {
-                    current.selection
-                },
+                selection = current.selection.copy(anchorDate = normalizedAnchor),
                 selectedPointIndex = null,
             )
         }
@@ -276,11 +287,24 @@ class ChartViewModel @Inject constructor(
         }
 
     fun openCategoryAnalysis(categoryId: String, type: UiEntryType, period: UiChartPeriod, anchorDate: LocalDate) {
-        val requested = CategoryAnalysisSelection(categoryId, type, period, anchorDate)
+        val normalizedAnchor = normalizedPeriodAnchor(period, anchorDate, anchorDate, today.value) ?: return
+        val requested = CategoryAnalysisSelection(categoryId, type, period, normalizedAnchor)
         if (analysisSelection.value == requested) return
         analysisSelection.value = requested
         _selectedBreakdownId.value = null
         analysisRankingOrder.value = UiEntryRankingOrder.AMOUNT
+    }
+
+    /**
+     * Initializes a category-analysis destination without overwriting period-rail state that was
+     * changed after the destination was first opened. Navigation may recompose the destination
+     * when a child editor is popped, while its immutable route key still contains the original
+     * period. A different category or type is a genuinely new destination and must be initialized.
+     */
+    fun ensureCategoryAnalysis(categoryId: String, type: UiEntryType, period: UiChartPeriod, anchorDate: LocalDate) {
+        val current = analysisSelection.value
+        if (current?.categoryId == categoryId && current.type == type) return
+        openCategoryAnalysis(categoryId, type, period, anchorDate)
     }
 
     fun closeCategoryAnalysis() {
@@ -289,22 +313,26 @@ class ChartViewModel @Inject constructor(
     }
 
     fun setAnalysisPeriod(period: UiChartPeriod) {
-        analysisSelection.value = analysisSelection.value?.copy(period = period)
+        val current = analysisSelection.value ?: return
+        if (current.period == period) return
+        val normalizedAnchor = normalizedPeriodAnchor(period, current.anchorDate, current.anchorDate, today.value) ?: return
+        analysisSelection.value = current.copy(period = period, anchorDate = normalizedAnchor)
         _selectedBreakdownId.value = null
     }
 
-    fun previousAnalysisPeriod() {
-        analysisSelection.value = analysisSelection.value?.let { current ->
-            current.copy(anchorDate = current.toDomainPeriod().previous().anchorDate)
-        }
-        _selectedBreakdownId.value = null
-    }
-
-    fun nextAnalysisPeriod() {
-        analysisSelection.value = analysisSelection.value?.let { current ->
-            val next = current.toDomainPeriod().next()
-            if (next.startDate <= today.value) current.copy(anchorDate = next.anchorDate) else current
-        }
+    fun selectAnalysisAnchor(anchorDate: LocalDate) {
+        val current = analysisSelection.value ?: return
+        val normalizedAnchor = normalizedPeriodAnchor(
+            period = current.period,
+            requestedAnchor = anchorDate,
+            referenceAnchor = current.anchorDate,
+            today = today.value,
+        ) ?: return
+        if (
+            ChartPeriod(current.period.toDomainGranularity(), normalizedAnchor).startDate ==
+            current.toDomainPeriod().startDate
+        ) return
+        analysisSelection.value = current.copy(anchorDate = normalizedAnchor)
         _selectedBreakdownId.value = null
     }
 
@@ -317,18 +345,67 @@ class ChartViewModel @Inject constructor(
     }
 
     fun refreshToday() {
-        today.value = LocalDate.now(clock)
+        refreshToday(LocalDate.now(clock))
+    }
+
+    internal fun refreshToday(refreshedToday: LocalDate) {
+        val chart = chartControl.value
+        val chartAxis = ChartPeriodAxis(chart.selection.period.toDomainGranularity(), maxDate = refreshedToday)
+        val chartPeriod = chart.selection.toDomainPeriod()
+        if (!chartAxis.contains(chartPeriod)) {
+            val boundedPeriod = if (chartPeriod.startDate < chartAxis.firstPeriod.startDate) {
+                chartAxis.firstPeriod
+            } else {
+                chartAxis.lastPeriod
+            }
+            chartControl.value = chart.copy(
+                selection = chart.selection.copy(anchorDate = boundedPeriod.startDate),
+                selectedPointIndex = null,
+            )
+        }
+
+        analysisSelection.value?.let { analysis ->
+            val analysisAxis = ChartPeriodAxis(analysis.period.toDomainGranularity(), maxDate = refreshedToday)
+            val analysisPeriod = analysis.toDomainPeriod()
+            if (!analysisAxis.contains(analysisPeriod)) {
+                val boundedPeriod = if (analysisPeriod.startDate < analysisAxis.firstPeriod.startDate) {
+                    analysisAxis.firstPeriod
+                } else {
+                    analysisAxis.lastPeriod
+                }
+                analysisSelection.value = analysis.copy(anchorDate = boundedPeriod.startDate)
+                _selectedBreakdownId.value = null
+            }
+        }
+        today.value = refreshedToday
     }
 }
 
-private fun ChartSelection.toDomainPeriod() = ChartPeriod(period.toGranularity(), anchorDate)
-private fun ChartSelection.key(): String = "${type.name}|${period.name}|${anchorDate.toEpochDay()}"
-private fun CategoryAnalysisSelection.toDomainPeriod() = ChartPeriod(period.toGranularity(), anchorDate)
+private fun ChartSelection.toDomainPeriod() = ChartPeriod(period.toDomainGranularity(), anchorDate)
+private fun ChartSelection.key(): String = "${type.name}|${period.name}|${toDomainPeriod().startDate.toEpochDay()}"
+private fun CategoryAnalysisSelection.toDomainPeriod() = ChartPeriod(period.toDomainGranularity(), anchorDate)
 
-private fun UiChartPeriod.toGranularity() = when (this) {
-    UiChartPeriod.WEEK -> ChartGranularity.WEEK
-    UiChartPeriod.MONTH -> ChartGranularity.MONTH
-    UiChartPeriod.YEAR -> ChartGranularity.YEAR
+private fun normalizedPeriodAnchor(
+    period: UiChartPeriod,
+    requestedAnchor: LocalDate,
+    referenceAnchor: LocalDate,
+    today: LocalDate,
+): LocalDate? {
+    val granularity = period.toDomainGranularity()
+    val domainPeriod = runCatching { ChartPeriod(granularity, requestedAnchor) }.getOrNull()
+        ?: return null
+    val axis = ChartPeriodAxis(granularity, maxDate = today)
+    if (!axis.contains(domainPeriod)) return null
+    val normalized = when (granularity) {
+        ChartGranularity.WEEK -> domainPeriod.startDate.plusDays(referenceAnchor.dayOfWeek.value.toLong() - 1L)
+        ChartGranularity.MONTH -> YearMonth.from(domainPeriod.startDate).let { targetMonth ->
+            targetMonth.atDay(referenceAnchor.dayOfMonth.coerceAtMost(targetMonth.lengthOfMonth()))
+        }
+        ChartGranularity.YEAR -> YearMonth.of(domainPeriod.startDate.year, referenceAnchor.monthValue).let { targetMonth ->
+            targetMonth.atDay(referenceAnchor.dayOfMonth.coerceAtMost(targetMonth.lengthOfMonth()))
+        }
+    }
+    return normalized.coerceAtMost(today)
 }
 
 private fun ChartPeriod.displayLabel(): String = when (granularity) {

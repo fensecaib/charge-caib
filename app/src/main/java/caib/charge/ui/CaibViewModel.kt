@@ -13,6 +13,7 @@ import caib.charge.domain.model.ImportPreviewBatch
 import caib.charge.domain.model.ImportRowStatus
 import caib.charge.domain.model.LedgerEntry
 import caib.charge.domain.model.LedgerEntryDraft
+import caib.charge.domain.model.LedgerEntryPatch
 import caib.charge.domain.repository.CategoryRepository
 import caib.charge.domain.repository.CsvTransferService
 import caib.charge.domain.repository.LedgerRepository
@@ -21,14 +22,15 @@ import caib.charge.ui.entry.EntrySheetResult
 import caib.charge.ui.model.UiCategory
 import caib.charge.ui.model.UiDetailFilter
 import caib.charge.ui.model.UiEntryType
-import caib.charge.ui.model.UiHistoryTemplateState
 import caib.charge.ui.model.UiImportRow
 import caib.charge.ui.model.UiImportStatus
 import caib.charge.ui.model.UiLedgerEntry
 import caib.charge.ui.model.UiPeriodSummary
 import caib.charge.ui.model.UiRecentCategoriesState
+import caib.charge.ui.model.UiRecentNoteState
 import caib.charge.ui.model.toDomain
 import caib.charge.ui.model.toUi
+import caib.charge.ui.model.selectMonth
 import caib.charge.ui.profile.ExportScopeChoice
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.time.Clock
@@ -86,7 +88,7 @@ class CaibViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), caib.charge.domain.model.LedgerStats(0, 0))
 
     private val entryRecommendations = EntryRecommendationStore(ledgerRepository, viewModelScope)
-    val historyTemplateState: StateFlow<UiHistoryTemplateState> = entryRecommendations.historyState
+    val recentNoteState: StateFlow<UiRecentNoteState> = entryRecommendations.recentNoteState
 
     private val _importPreview = MutableStateFlow<ImportPreviewBatch?>(null)
     val importPreview: StateFlow<ImportPreviewBatch?> = _importPreview
@@ -145,7 +147,7 @@ class CaibViewModel @Inject constructor(
     }
 
     fun setMonth(month: YearMonth) {
-        detailFilter.value = detailFilter.value.copy(month = month, year = null, exactDate = null)
+        detailFilter.value = detailFilter.value.selectMonth(month, currentMonth)
     }
 
     fun revealSavedEntry(date: LocalDate) {
@@ -154,62 +156,42 @@ class CaibViewModel @Inject constructor(
 
     fun previousDetailPeriod() {
         val current = detailFilter.value
-        detailFilter.value = if (current.year != null) {
-            val previousYear = current.year - 1
-            if (previousYear >= EntryDateLimits.MIN_DATE.year) {
-                current.copy(year = previousYear, month = YearMonth.of(previousYear, 1), exactDate = null)
-            } else {
-                current
-            }
-        } else {
-            val previousMonth = current.month.minusMonths(1)
-            if (previousMonth >= YearMonth.from(EntryDateLimits.MIN_DATE)) {
-                current.copy(month = previousMonth, exactDate = null)
-            } else {
-                current
-            }
+        val previousMonth = current.month.minusMonths(1)
+        if (previousMonth >= YearMonth.from(EntryDateLimits.MIN_DATE)) {
+            detailFilter.value = current.copy(month = previousMonth)
         }
     }
 
     fun nextDetailPeriod() {
         val current = detailFilter.value
-        detailFilter.value = if (current.year != null) {
-            val nextYear = current.year + 1
-            if (nextYear <= currentMonth.year) {
-                current.copy(year = nextYear, month = YearMonth.of(nextYear, 1), exactDate = null)
-            } else {
-                current
-            }
-        } else {
-            val nextMonth = current.month.plusMonths(1)
-            if (nextMonth <= currentMonth) current.copy(month = nextMonth, exactDate = null) else current
+        val nextMonth = current.month.plusMonths(1)
+        if (nextMonth <= currentMonth) {
+            detailFilter.value = current.copy(month = nextMonth)
         }
     }
 
     fun setTypeFilter(type: UiEntryType?) {
         val currentCategory = detailFilter.value.categoryId
         val compatible = currentCategory == null || categories.value.any { it.id == currentCategory && (type == null || it.type == type) }
-        detailFilter.value = detailFilter.value.copy(type = type, categoryId = currentCategory.takeIf { compatible }, exactDate = null)
+        detailFilter.value = detailFilter.value.copy(type = type, categoryId = currentCategory.takeIf { compatible })
     }
 
     fun setCategoryFilter(categoryId: String?) {
-        detailFilter.value = detailFilter.value.copy(categoryId = categoryId, exactDate = null)
+        detailFilter.value = detailFilter.value.copy(categoryId = categoryId)
     }
 
-    fun setTemplateContext(type: UiEntryType, categoryId: String?) {
-        entryRecommendations.setHistoryContext(type, categoryId)
+    fun setRecentNoteContext(type: UiEntryType, categoryId: String?) {
+        entryRecommendations.setRecentNoteContext(type, categoryId)
     }
 
-    fun clearTemplateContext() {
-        entryRecommendations.setHistoryContext(UiEntryType.EXPENSE, null)
+    fun clearRecentNoteContext() {
+        entryRecommendations.setRecentNoteContext(UiEntryType.EXPENSE, null)
     }
 
     fun saveEntry(result: EntrySheetResult, onSaved: (Long) -> Unit) {
-        if (!saveMutex.tryLock()) return
-        _isSaving.value = true
-        viewModelScope.launch {
-            try {
-                val savedId = ledgerRepository.upsert(
+        executeEntrySave(
+            operation = {
+                ledgerRepository.upsert(
                     LedgerEntryDraft(
                         id = result.id,
                         type = result.type.toDomain(),
@@ -219,20 +201,64 @@ class CaibViewModel @Inject constructor(
                         note = result.note,
                     )
                 )
-                if (categories.value.any { category ->
-                        category.id == result.categoryId && category.type == result.type && !category.archived
-                    }
-                ) {
-                    entryRecommendations.recordRecentCategory(result.type, result.categoryId)
-                }
+            },
+            successMessage = when {
+                result.id == null -> "已保存账目"
+                result.originalDate != null && result.originalDate != result.date ->
+                    "已更新并移动到 ${result.date.monthValue}月${result.date.dayOfMonth}日"
+                else -> "已更新账目"
+            },
+            onSaved = onSaved,
+        )
+    }
+
+    fun updateEntryAmountAndDate(
+        id: Long,
+        amountCents: Long,
+        date: LocalDate,
+        onSaved: (Long) -> Unit,
+    ) {
+        executeEntrySave(
+            operation = {
+                ledgerRepository.update(
+                    id,
+                    LedgerEntryPatch.AmountAndDate(amountCents = amountCents, entryDate = date),
+                )
+            },
+            successMessage = "已更新金额与日期",
+            onSaved = onSaved,
+        )
+    }
+
+    fun updateEntryNote(id: Long, note: String, onSaved: (Long) -> Unit) {
+        executeEntrySave(
+            operation = { ledgerRepository.update(id, LedgerEntryPatch.Note(note)) },
+            successMessage = "已更新备注",
+            onSaved = onSaved,
+        )
+    }
+
+    fun updateEntryCategory(id: Long, categoryId: String, onSaved: (Long) -> Unit) {
+        executeEntrySave(
+            operation = { ledgerRepository.update(id, LedgerEntryPatch.Category(categoryId)) },
+            successMessage = "已更新分类",
+            onSaved = onSaved,
+        )
+    }
+
+    private fun executeEntrySave(
+        operation: suspend () -> Long,
+        successMessage: String,
+        onSaved: (Long) -> Unit,
+    ) {
+        if (!saveMutex.tryLock()) return
+        _isSaving.value = true
+        viewModelScope.launch {
+            try {
+                val savedId = operation()
+                refreshRecentCategory(savedId)
                 onSaved(savedId)
-                val message = when {
-                    result.id == null -> "已保存账目"
-                    result.originalDate != null && result.originalDate != result.date ->
-                        "已更新并移动到 ${result.date.monthValue}月${result.date.dayOfMonth}日"
-                    else -> "已更新账目"
-                }
-                messageChannel.send(UiMessage(message))
+                messageChannel.send(UiMessage(successMessage))
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
@@ -241,6 +267,19 @@ class CaibViewModel @Inject constructor(
                 _isSaving.value = false
                 saveMutex.unlock()
             }
+        }
+    }
+
+    private suspend fun refreshRecentCategory(savedId: Long) {
+        val savedEntry = try {
+            ledgerRepository.getEntry(savedId)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            null
+        }
+        if (savedEntry != null && !savedEntry.category.isArchived) {
+            entryRecommendations.recordRecentCategory(savedEntry.type.toUi(), savedEntry.category.id)
         }
     }
 
@@ -392,7 +431,7 @@ class CaibViewModel @Inject constructor(
 }
 
 private fun UiDetailFilter.toDomain(): DetailFilter {
-    val start = exactDate ?: year?.let { LocalDate.of(it, 1, 1) } ?: month.atDay(1)
-    val end = exactDate ?: year?.let { LocalDate.of(it, 12, 31) } ?: month.atEndOfMonth()
+    val start = month.atDay(1)
+    val end = month.atEndOfMonth()
     return DetailFilter(start.toEpochDay(), end.toEpochDay(), type?.toDomain(), categoryId)
 }

@@ -23,11 +23,6 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.ChevronLeft
-import androidx.compose.material.icons.rounded.ChevronRight
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -62,6 +57,7 @@ import caib.charge.ui.model.UiLedgerEntry
 import caib.charge.ui.theme.CaibCyanDeep
 import caib.charge.ui.theme.CaibPink
 import caib.charge.ui.util.formatMoney
+import java.time.LocalDate
 import kotlin.math.roundToInt
 
 @Composable
@@ -69,6 +65,8 @@ fun ChartScreen(
     type: UiEntryType,
     period: UiChartPeriod,
     periodLabel: String,
+    periodAnchorDate: LocalDate,
+    today: LocalDate,
     points: List<UiChartPoint>,
     ranking: List<UiCategorySlice>,
     modifier: Modifier = Modifier,
@@ -76,9 +74,7 @@ fun ChartScreen(
     selectedPointEntries: List<UiLedgerEntry> = emptyList(),
     onTypeChange: (UiEntryType) -> Unit,
     onPeriodChange: (UiChartPeriod) -> Unit,
-    onPreviousPeriod: () -> Unit,
-    onNextPeriod: () -> Unit,
-    canNextPeriod: Boolean,
+    onPeriodSelected: (LocalDate) -> Unit,
     onPointClick: (UiChartPoint) -> Unit,
     onCategoryClick: (UiCategorySlice) -> Unit,
 ) {
@@ -91,9 +87,6 @@ fun ChartScreen(
         ChartTopBar(
             title = "图表",
             periodLabel = periodLabel,
-            onPrevious = onPreviousPeriod,
-            onNext = onNextPeriod,
-            canNext = canNextPeriod,
         )
         LazyColumn(
             modifier = Modifier.fillMaxSize().testTag("chart_scroll"),
@@ -102,21 +95,36 @@ fun ChartScreen(
         ) {
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    SakuSegmentedRow(
-                        options = listOf(UiEntryType.EXPENSE to "支出", UiEntryType.INCOME to "收入"),
-                        selected = type,
-                        onSelect = onTypeChange,
-                        contentDescriptionPrefix = "图表收支",
-                    )
-                    SakuSegmentedRow(
-                        options = listOf(
-                            UiChartPeriod.WEEK to "周",
-                            UiChartPeriod.MONTH to "月",
-                            UiChartPeriod.YEAR to "年",
-                        ),
-                        selected = period,
-                        onSelect = onPeriodChange,
-                        contentDescriptionPrefix = "图表周期",
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        SakuSegmentedRow(
+                            options = listOf(UiEntryType.EXPENSE to "支出", UiEntryType.INCOME to "收入"),
+                            selected = type,
+                            onSelect = onTypeChange,
+                            contentDescriptionPrefix = "图表收支",
+                            modifier = Modifier.weight(2f),
+                        )
+                        SakuSegmentedRow(
+                            options = listOf(
+                                UiChartPeriod.WEEK to "周",
+                                UiChartPeriod.MONTH to "月",
+                                UiChartPeriod.YEAR to "年",
+                            ),
+                            selected = period,
+                            onSelect = onPeriodChange,
+                            contentDescriptionPrefix = "图表周期",
+                            modifier = Modifier.weight(3f),
+                        )
+                    }
+                    SakuPeriodRail(
+                        period = period,
+                        selectedAnchorDate = periodAnchorDate,
+                        today = today,
+                        onPeriodSelected = onPeriodSelected,
+                        contentDescriptionPrefix = "图表",
+                        testTagPrefix = "chart",
                     )
                 }
             }
@@ -179,18 +187,8 @@ fun ChartScreen(
 private fun ChartTopBar(
     title: String,
     periodLabel: String,
-    onPrevious: () -> Unit,
-    onNext: () -> Unit,
-    canNext: Boolean,
 ) {
-    SakuTopBar(title = title, subtitle = periodLabel, actions = {
-        IconButton(onClick = onPrevious, modifier = Modifier.size(48.dp)) {
-            Icon(Icons.Rounded.ChevronLeft, contentDescription = "上一个周期")
-        }
-        IconButton(onClick = onNext, enabled = canNext, modifier = Modifier.size(48.dp)) {
-            Icon(Icons.Rounded.ChevronRight, contentDescription = "下一个周期")
-        }
-    })
+    SakuTopBar(title = title, subtitle = periodLabel)
 }
 
 @Composable
@@ -199,6 +197,7 @@ internal fun <T> SakuSegmentedRow(
     selected: T,
     onSelect: (T) -> Unit,
     contentDescriptionPrefix: String,
+    modifier: Modifier = Modifier,
 ) {
     val items = options.map { it.first }
     SakuSegmentedControl(
@@ -210,7 +209,7 @@ internal fun <T> SakuSegmentedRow(
             val label = options.first { it.first == value }.second
             "$contentDescriptionPrefix：$label${if (value == selected) "，已选择" else ""}"
         },
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
     )
 }
 

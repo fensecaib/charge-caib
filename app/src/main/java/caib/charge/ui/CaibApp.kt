@@ -47,6 +47,7 @@ import caib.charge.ui.components.EntryReturnOverlay
 import caib.charge.ui.components.EntrySaveSuccessOverlay
 import caib.charge.ui.components.SakuBottomBar
 import caib.charge.ui.components.SakuBottomTab
+import caib.charge.ui.components.SakuMonthPickerDialog
 import caib.charge.ui.components.rememberEntryReturnMotionState
 import caib.charge.ui.detail.DetailScreen
 import caib.charge.ui.discover.DiscoverScreen
@@ -58,6 +59,7 @@ import caib.charge.ui.model.UiChartPeriod
 import caib.charge.ui.model.UiEntryType
 import caib.charge.ui.model.UiLedgerEntry
 import caib.charge.ui.model.UiRecentCategoriesState
+import caib.charge.ui.model.UiRecentNoteState
 import caib.charge.ui.navigation.KeepAliveTabs
 import caib.charge.ui.navigation.entries
 import caib.charge.ui.navigation.rememberTopLevelNavigation
@@ -124,7 +126,7 @@ fun CaibApp(
 ) {
     val navigation = rememberTopLevelNavigation(DetailKey, destinations.mapTo(linkedSetOf()) { it.key })
     val categories by viewModel.categories.collectAsStateWithLifecycle()
-    val historyTemplateState by viewModel.historyTemplateState.collectAsStateWithLifecycle()
+    val recentNoteState by viewModel.recentNoteState.collectAsStateWithLifecycle()
     val importBatch by viewModel.importPreview.collectAsStateWithLifecycle()
     val isImporting by viewModel.isImporting.collectAsStateWithLifecycle()
     val isSaving by viewModel.isSaving.collectAsStateWithLifecycle()
@@ -136,6 +138,7 @@ fun CaibApp(
     var categoryManagerType by remember { mutableStateOf<UiEntryType?>(null) }
     var quickAmountTarget by remember { mutableStateOf<Pair<UiLedgerEntry, Rect>?>(null) }
     var quickNoteEntry by remember { mutableStateOf<UiLedgerEntry?>(null) }
+    var detailMonthPickerInitial by remember { mutableStateOf<YearMonth?>(null) }
     var motionSession by remember { mutableIntStateOf(0) }
     var entryLaunchSession by remember { mutableStateOf<Int?>(null) }
     var entryDestinationReadySession by remember { mutableStateOf<Int?>(null) }
@@ -186,9 +189,6 @@ fun CaibApp(
             pendingEntryReturnMotion != null
         ) return
         viewModel.prepareEditor(null, force = true)
-        val initialCategoryId = recentCategories[UiEntryType.EXPENSE]
-            ?: categories.firstOrNull { it.type == UiEntryType.EXPENSE && !it.archived }?.id
-        viewModel.setTemplateContext(UiEntryType.EXPENSE, initialCategoryId)
         motionSession += 1
         entryDestinationReadySession = null
         entryLaunchSession = motionSession
@@ -200,7 +200,7 @@ fun CaibApp(
         val mode = runCatching { EntryEditorMode.valueOf(key.mode) }.getOrDefault(EntryEditorMode.FULL)
         if (key.entryId != null || mode != EntryEditorMode.NEW) {
             navigation.pop()
-            viewModel.clearTemplateContext()
+            viewModel.clearRecentNoteContext()
             return
         }
         if (entryLaunchSession != null || pendingEntrySaveMotion != null || pendingEntryReturnMotion != null) return
@@ -226,13 +226,13 @@ fun CaibApp(
                 today = viewModel.currentDate,
                 onPreviousMonth = viewModel::previousDetailPeriod,
                 onNextMonth = viewModel::nextDetailPeriod,
+                onPeriodPickerRequest = { detailMonthPickerInitial = filter.month },
                 onTypeFilter = viewModel::setTypeFilter,
                 onCategoryFilter = viewModel::setCategoryFilter,
                 onEntryClick = { openEditor(it.id, EntryEditorMode.FULL) },
                 onCategoryHotspotClick = { openEditor(it.id, EntryEditorMode.CATEGORY_ONLY) },
                 onInfoHotspotClick = { quickNoteEntry = it },
-                onAmountHotspotClick = { openEditor(it.id, EntryEditorMode.AMOUNT_DATE_ONLY) },
-                onAmountHotspotBoundsClick = { entry, bounds -> quickAmountTarget = entry to bounds },
+                onAmountHotspotClick = { entry, bounds -> quickAmountTarget = entry to bounds },
                 onDeleteRequest = { entry -> viewModel.deleteEntry(entry.id) {} },
                 recentlyCreatedEntryId = recentlyCreatedEntryId,
                 onInsertAnimationFinished = { entryId ->
@@ -246,22 +246,23 @@ fun CaibApp(
             val chartLabel by chartViewModel.chartPeriodLabel.collectAsStateWithLifecycle()
             val chartPoints by chartViewModel.chartPoints.collectAsStateWithLifecycle()
             val ranking by chartViewModel.chartRanking.collectAsStateWithLifecycle()
-            val chartCanNext by chartViewModel.chartCanNext.collectAsStateWithLifecycle()
+            val chartAnchor by chartViewModel.chartPeriodAnchor.collectAsStateWithLifecycle()
+            val chartToday by chartViewModel.currentDate.collectAsStateWithLifecycle()
             val selectedPoint by chartViewModel.selectedPoint.collectAsStateWithLifecycle()
             val selectedPointEntries by chartViewModel.selectedPointEntries.collectAsStateWithLifecycle()
             ChartScreen(
                 type = chartType,
                 period = chartKind,
                 periodLabel = chartLabel,
+                periodAnchorDate = chartAnchor,
+                today = chartToday,
                 points = chartPoints,
                 ranking = ranking,
                 selectedPoint = selectedPoint,
                 selectedPointEntries = selectedPointEntries,
                 onTypeChange = chartViewModel::setChartType,
                 onPeriodChange = chartViewModel::setChartPeriod,
-                onPreviousPeriod = chartViewModel::previousChartPeriod,
-                onNextPeriod = chartViewModel::nextChartPeriod,
-                canNextPeriod = chartCanNext,
+                onPeriodSelected = chartViewModel::selectChartAnchor,
                 onPointClick = chartViewModel::selectPoint,
                 onCategoryClick = categoryClick@{ slice ->
                     val key = chartViewModel.categoryAnalysisKey(slice) ?: return@categoryClick
@@ -319,18 +320,17 @@ fun CaibApp(
                     else -> EntryEditorScreen(
                         existing = editorEntry?.takeIf { key.entryId != null && it.id == key.entryId },
                         categories = categories,
-                        templates = emptyList(),
-                        historyTemplateState = historyTemplateState,
+                        recentNoteState = recentNoteState,
                         today = viewModel.currentDate,
                         isSaving = isSaving,
                         mode = mode,
                         initialCategoryId = recentCategories[UiEntryType.EXPENSE],
                         preferredCategoryIds = recentCategories,
-                        onTemplateContextChanged = viewModel::setTemplateContext,
+                        onRecentNoteContextChanged = viewModel::setRecentNoteContext,
                         onManageCategories = { categoryManagerType = it },
                         onDismiss = { dismissEditor(key) },
                         onSave = { result ->
-                            viewModel.saveEntry(result) { savedId ->
+                            val onSaved: (Long) -> Unit = { savedId ->
                                 if (navigation.activeStack.lastOrNull() == key) {
                                     if (result.id == null) {
                                         if (pendingEntryReturnMotion == null) {
@@ -344,9 +344,27 @@ fun CaibApp(
                                         }
                                     } else {
                                         navigation.pop()
-                                        viewModel.clearTemplateContext()
+                                        viewModel.clearRecentNoteContext()
                                     }
                                 }
+                            }
+                            when (mode) {
+                                EntryEditorMode.CATEGORY_ONLY -> result.id?.let { id ->
+                                    viewModel.updateEntryCategory(id, result.categoryId, onSaved)
+                                }
+                                EntryEditorMode.NOTE_ONLY -> result.id?.let { id ->
+                                    viewModel.updateEntryNote(id, result.note, onSaved)
+                                }
+                                EntryEditorMode.AMOUNT_DATE_ONLY -> result.id?.let { id ->
+                                    viewModel.updateEntryAmountAndDate(
+                                        id = id,
+                                        amountCents = result.amountCents,
+                                        date = result.date,
+                                        onSaved = onSaved,
+                                    )
+                                }
+                                EntryEditorMode.NEW, EntryEditorMode.FULL ->
+                                    viewModel.saveEntry(result, onSaved)
                             }
                         },
                         onDelete = editorEntry?.let {
@@ -354,7 +372,7 @@ fun CaibApp(
                                 viewModel.deleteEntry(entry.id) {
                                     if (navigation.activeStack.lastOrNull() == key) {
                                         navigation.pop()
-                                        viewModel.clearTemplateContext()
+                                        viewModel.clearRecentNoteContext()
                                     }
                                 }
                             }
@@ -379,7 +397,8 @@ fun CaibApp(
             val analysisType by chartViewModel.analysisType.collectAsStateWithLifecycle()
             val analysisKind by chartViewModel.analysisPeriodKind.collectAsStateWithLifecycle()
             val analysisLabel by chartViewModel.analysisPeriodLabel.collectAsStateWithLifecycle()
-            val analysisCanNext by chartViewModel.analysisCanNext.collectAsStateWithLifecycle()
+            val analysisAnchor by chartViewModel.analysisPeriodAnchor.collectAsStateWithLifecycle()
+            val analysisToday by chartViewModel.currentDate.collectAsStateWithLifecycle()
             val analysisPoints by chartViewModel.analysisPoints.collectAsStateWithLifecycle()
             val analysisEntries by chartViewModel.analysisEntries.collectAsStateWithLifecycle()
             val analysisTotal by chartViewModel.analysisTotalForType.collectAsStateWithLifecycle()
@@ -389,7 +408,7 @@ fun CaibApp(
             val keyType = runCatching { UiEntryType.valueOf(key.type) }.getOrDefault(UiEntryType.EXPENSE)
             val keyPeriod = runCatching { UiChartPeriod.valueOf(key.period) }.getOrDefault(UiChartPeriod.MONTH)
             LaunchedEffect(key) {
-                chartViewModel.openCategoryAnalysis(
+                chartViewModel.ensureCategoryAnalysis(
                     categoryId = key.categoryId,
                     type = keyType,
                     period = keyPeriod,
@@ -401,6 +420,8 @@ fun CaibApp(
                 type = analysisType,
                 period = analysisKind,
                 periodLabel = analysisLabel,
+                periodAnchorDate = analysisAnchor,
+                today = analysisToday,
                 points = analysisPoints,
                 entries = analysisEntries,
                 totalForTypeCents = analysisTotal,
@@ -412,9 +433,7 @@ fun CaibApp(
                     navigation.pop()
                 },
                 onPeriodChange = chartViewModel::setAnalysisPeriod,
-                onPreviousPeriod = chartViewModel::previousAnalysisPeriod,
-                onNextPeriod = chartViewModel::nextAnalysisPeriod,
-                canNextPeriod = analysisCanNext,
+                onPeriodSelected = chartViewModel::selectAnalysisAnchor,
                 onBreakdownSelect = chartViewModel::selectBreakdown,
                 onRankingOrderChange = chartViewModel::setAnalysisRankingOrder,
                 onEntryClick = { openEditor(it.id, EntryEditorMode.FULL) },
@@ -532,14 +551,13 @@ fun CaibApp(
                         EntryEditorScreen(
                             existing = null,
                             categories = categories,
-                            templates = emptyList(),
-                            historyTemplateState = historyTemplateState,
+                            recentNoteState = UiRecentNoteState(),
                             today = viewModel.currentDate,
                             isSaving = false,
                             mode = EntryEditorMode.NEW,
                             initialCategoryId = recentCategories[UiEntryType.EXPENSE],
                             preferredCategoryIds = recentCategories,
-                            onTemplateContextChanged = { _, _ -> },
+                            onRecentNoteContextChanged = { _, _ -> },
                             onManageCategories = {},
                             onDismiss = {},
                             onSave = {},
@@ -565,7 +583,7 @@ fun CaibApp(
                             navigation.activeStack.lastOrNull() == pending.editorKey
                         ) {
                             navigation.pop()
-                            viewModel.clearTemplateContext()
+                            viewModel.clearRecentNoteContext()
                         }
                     },
                     onFinished = {
@@ -595,7 +613,7 @@ fun CaibApp(
                 onFinished = {
                     if (pendingEntrySaveMotion?.sessionId == pending.sessionId) {
                         if (navigation.activeStack.lastOrNull() == pending.editorKey) navigation.pop()
-                        viewModel.clearTemplateContext()
+                        viewModel.clearRecentNoteContext()
                         viewModel.revealSavedEntry(pending.entryDate)
                         recentlyCreatedEntryId = pending.savedId
                         navigation.active = DetailKey
@@ -615,8 +633,8 @@ fun CaibApp(
             today = viewModel.currentDate,
             isSaving = isSaving,
             onDismiss = { quickAmountTarget = null },
-            onSave = { result ->
-                viewModel.saveEntry(result) { _ ->
+            onSave = { amountCents, date ->
+                viewModel.updateEntryAmountAndDate(entry.id, amountCents, date) { _ ->
                     if (quickAmountTarget?.first?.id == entry.id) quickAmountTarget = null
                 }
             },
@@ -628,10 +646,22 @@ fun CaibApp(
             entry = entry,
             isSaving = isSaving,
             onDismiss = { quickNoteEntry = null },
-            onSave = { result ->
-                viewModel.saveEntry(result) { _ ->
+            onSave = { note ->
+                viewModel.updateEntryNote(entry.id, note) { _ ->
                     if (quickNoteEntry?.id == entry.id) quickNoteEntry = null
                 }
+            },
+        )
+    }
+
+    detailMonthPickerInitial?.let { initialMonth ->
+        SakuMonthPickerDialog(
+            initialMonth = initialMonth,
+            today = viewModel.currentDate,
+            onDismiss = { detailMonthPickerInitial = null },
+            onConfirm = { month ->
+                viewModel.setMonth(month)
+                detailMonthPickerInitial = null
             },
         )
     }

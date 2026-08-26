@@ -1,6 +1,7 @@
 package caib.charge.ui.model
 
 import caib.charge.domain.model.Category
+import caib.charge.domain.model.ChartGranularity
 import caib.charge.domain.model.EntryType
 import caib.charge.domain.model.LedgerEntry
 
@@ -12,6 +13,12 @@ internal fun UiEntryType.toDomain(): EntryType = when (this) {
 internal fun EntryType.toUi(): UiEntryType = when (this) {
     EntryType.EXPENSE -> UiEntryType.EXPENSE
     EntryType.INCOME -> UiEntryType.INCOME
+}
+
+internal fun UiChartPeriod.toDomainGranularity(): ChartGranularity = when (this) {
+    UiChartPeriod.WEEK -> ChartGranularity.WEEK
+    UiChartPeriod.MONTH -> ChartGranularity.MONTH
+    UiChartPeriod.YEAR -> ChartGranularity.YEAR
 }
 
 internal fun Category.toUi() = UiCategory(

@@ -12,6 +12,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -35,27 +36,29 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Backspace
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -67,40 +70,50 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntRect
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupPositionProvider
+import androidx.compose.ui.window.PopupProperties
 import caib.charge.domain.AmountError
 import caib.charge.domain.AmountExpressionEngine
 import caib.charge.domain.model.EntryDateLimits
 import caib.charge.ui.components.CategoryIcon
 import caib.charge.ui.components.SakuCard
 import caib.charge.ui.components.SakuCtaButton
-import caib.charge.ui.components.SakuSegmentedControl
+import caib.charge.ui.components.SakuNumberPickerColumn
 import caib.charge.ui.components.SakuTopBar
 import caib.charge.ui.components.EntryMotionTokens
 import caib.charge.ui.model.UiCategory
 import caib.charge.ui.model.UiEntryType
-import caib.charge.ui.model.UiHistoryTemplate
-import caib.charge.ui.model.UiHistoryTemplateKey
-import caib.charge.ui.model.UiHistoryTemplateState
 import caib.charge.ui.model.UiLedgerEntry
+import caib.charge.ui.model.UiRecentNoteState
+import caib.charge.ui.model.UiRecentNoteSuggestion
 import caib.charge.ui.theme.CategoryPalette
 import caib.charge.ui.util.formatFullDate
 import caib.charge.ui.util.formatMoney
@@ -134,8 +147,8 @@ data class EntrySheetResult(
 fun EntryEditorScreen(
     existing: UiLedgerEntry?,
     categories: List<UiCategory>,
-    templates: List<UiHistoryTemplate>,
-    onTemplateContextChanged: (UiEntryType, String?) -> Unit,
+    recentNoteState: UiRecentNoteState,
+    onRecentNoteContextChanged: (UiEntryType, String?) -> Unit,
     onManageCategories: (UiEntryType) -> Unit,
     onDismiss: () -> Unit,
     onSave: (EntrySheetResult) -> Unit,
@@ -146,7 +159,6 @@ fun EntryEditorScreen(
     initialCategoryId: String? = null,
     preferredCategoryIds: Map<UiEntryType, String> = emptyMap(),
     onDelete: ((UiLedgerEntry) -> Unit)? = null,
-    historyTemplateState: UiHistoryTemplateState? = null,
     motionPreview: Boolean = false,
 ) {
     val initialType = existing?.type ?: UiEntryType.EXPENSE
@@ -179,17 +191,18 @@ fun EntryEditorScreen(
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var showDiscardConfirm by remember { mutableStateOf(false) }
     var noteFocused by remember(existing?.id, mode) { mutableStateOf(false) }
+    var recentNotesDismissed by remember(existing?.id, mode, type, categoryId) {
+        mutableStateOf(false)
+    }
+    var editorTopPx by remember { mutableIntStateOf(0) }
 
     val evaluation = remember(expression) { AmountExpressionEngine.evaluate(expression) }
     val activeCategories = remember(categories, type) {
         categories.filter { it.type == type && !it.archived }.sortedBy { it.sortOrder }
     }
     val selectedCategory = categories.firstOrNull { it.id == categoryId }
-    val effectiveHistoryState = historyTemplateState ?: UiHistoryTemplateState(
-        key = initialCategory?.let { UiHistoryTemplateKey(initialType, it) },
-        items = templates,
-    )
-    val visibleTemplates = effectiveHistoryState.itemsFor(type, categoryId)
+    val visibleRecentNotes = recentNoteState.itemsFor(type, categoryId)
+    val currentRecentNoteContextChanged = rememberUpdatedState(onRecentNoteContextChanged)
     val noteFocusRequester = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -209,8 +222,10 @@ fun EntryEditorScreen(
     val showNote = mode == EntryEditorMode.NEW ||
         mode == EntryEditorMode.FULL ||
         mode == EntryEditorMode.NOTE_ONLY
-    val showHistory = mode == EntryEditorMode.NEW || mode == EntryEditorMode.FULL
+    val supportsRecentNotes = mode == EntryEditorMode.NEW || mode == EntryEditorMode.FULL
     val showKeypad = showAmount && !noteFocused && !imeVisible
+    val showRecentNotePopup = supportsRecentNotes && noteFocused &&
+        !recentNotesDismissed && visibleRecentNotes.isNotEmpty()
 
     fun submit(categoryOverride: String? = null) {
         val selectedId = categoryOverride ?: categoryId ?: return
@@ -252,8 +267,20 @@ fun EntryEditorScreen(
         }
     }
 
-    LaunchedEffect(type, categoryId) {
-        if (!motionPreview) onTemplateContextChanged(type, categoryId)
+    LaunchedEffect(noteFocused, type, categoryId, supportsRecentNotes, motionPreview) {
+        if (!motionPreview) {
+            onRecentNoteContextChanged(
+                type,
+                categoryId.takeIf { supportsRecentNotes && noteFocused },
+            )
+        }
+    }
+    DisposableEffect(motionPreview) {
+        onDispose {
+            if (!motionPreview) {
+                currentRecentNoteContextChanged.value(UiEntryType.EXPENSE, null)
+            }
+        }
     }
     LaunchedEffect(categories, type, mode, initialCategoryId, preferredCategoryIds) {
         if (mode == EntryEditorMode.NEW && categories.none { it.id == categoryId && it.type == type && !it.archived }) {
@@ -263,40 +290,48 @@ fun EntryEditorScreen(
     LaunchedEffect(mode) {
         if (!motionPreview && mode == EntryEditorMode.NOTE_ONLY) noteFocusRequester.requestFocus()
     }
-    BackHandler(enabled = !motionPreview) { requestDismiss() }
+    BackHandler(enabled = !motionPreview) {
+        requestDismiss()
+    }
 
     Column(
         modifier = modifier
             .fillMaxSize()
             .testTag("entry_editor_screen")
             .background(MaterialTheme.colorScheme.background)
+            .onGloballyPositioned { editorTopPx = it.boundsInWindow().top.toInt() }
             .imePadding()
     ) {
-        SakuTopBar(
-            title = when (mode) {
-                EntryEditorMode.NEW -> "新增记账"
-                EntryEditorMode.CATEGORY_ONLY -> "修改分类"
-                EntryEditorMode.NOTE_ONLY -> "修改备注"
-                EntryEditorMode.AMOUNT_DATE_ONLY -> "修改金额与日期"
-                EntryEditorMode.FULL -> "编辑账目"
-            },
-            onBack = ::requestDismiss
-        )
-
         if (showType) {
-            SakuSegmentedControl(
-                items = listOf(UiEntryType.EXPENSE, UiEntryType.INCOME),
-                selectedItem = type,
-                onItemSelected = { nextType ->
+            EntryTypeTopBar(
+                title = if (mode == EntryEditorMode.NEW) "新增记账" else "编辑账目",
+                selected = type,
+                enabled = !isSaving,
+                onBack = ::requestDismiss,
+                onTypeSelected = { nextType ->
                     if (type != nextType) {
+                        recentNotesDismissed = true
+                        focusManager.clearFocus(force = true)
+                        keyboardController?.hide()
                         type = nextType
-                        categoryId = defaultCategoryId(categories, nextType, preferredCategoryIds[nextType] ?: initialCategoryId)
+                        categoryId = defaultCategoryId(
+                            categories,
+                            nextType,
+                            preferredCategoryIds[nextType] ?: initialCategoryId,
+                        )
                     }
                 },
-                itemLabel = { if (it == UiEntryType.EXPENSE) "支出" else "收入" },
-                itemContentDescription = { if (it == UiEntryType.EXPENSE) "记支出" else "记收入" },
-                enabled = !isSaving,
-                modifier = Modifier.padding(horizontal = 16.dp)
+            )
+        } else {
+            SakuTopBar(
+                title = when (mode) {
+                    EntryEditorMode.CATEGORY_ONLY -> "修改分类"
+                    EntryEditorMode.NOTE_ONLY -> "修改备注"
+                    EntryEditorMode.AMOUNT_DATE_ONLY -> "修改金额与日期"
+                    EntryEditorMode.NEW -> "新增记账"
+                    EntryEditorMode.FULL -> "编辑账目"
+                },
+                onBack = ::requestDismiss,
             )
         }
 
@@ -330,6 +365,9 @@ fun EntryEditorScreen(
                         selectedId = categoryId,
                         enabled = !isSaving,
                         onSelect = { category ->
+                            recentNotesDismissed = true
+                            focusManager.clearFocus(force = true)
+                            keyboardController?.hide()
                             categoryId = category.id
                             if (mode == EntryEditorMode.CATEGORY_ONLY) submit(category.id)
                         },
@@ -349,45 +387,24 @@ fun EntryEditorScreen(
                     )
                 }
 
-                if (showHistory) {
-                    SectionHeading(title = "最近使用", supporting = "只回填金额与备注")
-                    if (visibleTemplates.isEmpty()) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(72.dp),
-                            contentAlignment = Alignment.CenterStart,
-                        ) {
-                            Text(
-                                "该分类暂无历史记录",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    } else {
-                        HistoryTemplateRow(
-                            templates = visibleTemplates,
-                            onTemplateClick = { template ->
-                                expression = centsToExpression(template.amountCents)
-                                note = template.note.take(100)
-                            },
-                        )
-                    }
-                }
-
                 if (showNote) {
-                    OutlinedTextField(
-                        value = note,
-                        onValueChange = { note = it.take(100) },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .onFocusChanged { noteFocused = it.isFocused }
-                            .focusRequester(noteFocusRequester),
+                    RecentNoteField(
+                        note = note,
+                        onNoteChange = { note = it.take(100) },
                         enabled = !isSaving,
-                        label = { Text("备注（可选）") },
-                        supportingText = { Text("${note.length}/100") },
-                        singleLine = true,
-                        shape = RoundedCornerShape(10.dp)
+                        noteFocusRequester = noteFocusRequester,
+                        onFocusChanged = { focused ->
+                            if (focused && !noteFocused) recentNotesDismissed = false
+                            noteFocused = focused
+                        },
+                        showPopup = showRecentNotePopup,
+                        suggestions = visibleRecentNotes,
+                        editorTopPx = editorTopPx,
+                        onDismissPopup = { recentNotesDismissed = true },
+                        onSuggestionClick = { suggestion ->
+                            note = suggestion.note.take(100)
+                            recentNotesDismissed = true
+                        },
                     )
                 }
 
@@ -502,6 +519,257 @@ fun EntryEditorScreen(
                 TextButton(onClick = { showDiscardConfirm = false }) { Text("继续编辑") }
             }
         )
+    }
+}
+
+@Composable
+private fun EntryTypeTopBar(
+    title: String,
+    selected: UiEntryType,
+    enabled: Boolean,
+    onBack: () -> Unit,
+    onTypeSelected: (UiEntryType) -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(48.dp)
+            .background(MaterialTheme.colorScheme.background)
+            .semantics {
+                heading()
+                contentDescription = title
+            },
+    ) {
+        IconButton(
+            onClick = onBack,
+            enabled = enabled,
+            modifier = Modifier
+                .align(Alignment.CenterStart)
+                .size(48.dp)
+                .semantics { contentDescription = "返回" },
+        ) {
+            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = null)
+        }
+
+        Surface(
+            modifier = Modifier
+                .align(Alignment.Center)
+                .width(144.dp)
+                .height(36.dp),
+            shape = RoundedCornerShape(18.dp),
+            color = MaterialTheme.colorScheme.surface,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        ) {}
+
+        Row(
+            modifier = Modifier
+                .align(Alignment.Center)
+                .width(144.dp)
+                .height(48.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            EntryTypeTopBarOption(
+                label = "支出",
+                type = UiEntryType.EXPENSE,
+                selected = selected == UiEntryType.EXPENSE,
+                enabled = enabled,
+                onSelect = onTypeSelected,
+                modifier = Modifier.weight(1f),
+            )
+            EntryTypeTopBarOption(
+                label = "收入",
+                type = UiEntryType.INCOME,
+                selected = selected == UiEntryType.INCOME,
+                enabled = enabled,
+                onSelect = onTypeSelected,
+                modifier = Modifier.weight(1f),
+            )
+        }
+    }
+}
+
+@Composable
+private fun EntryTypeTopBarOption(
+    label: String,
+    type: UiEntryType,
+    selected: Boolean,
+    enabled: Boolean,
+    onSelect: (UiEntryType) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val selectedContainer = if (type == UiEntryType.EXPENSE) {
+        MaterialTheme.colorScheme.errorContainer
+    } else {
+        MaterialTheme.colorScheme.primaryContainer
+    }
+    val selectedContent = if (type == UiEntryType.EXPENSE) {
+        MaterialTheme.colorScheme.onErrorContainer
+    } else {
+        MaterialTheme.colorScheme.onPrimaryContainer
+    }
+    val selectedOutline = if (type == UiEntryType.EXPENSE) {
+        MaterialTheme.colorScheme.error
+    } else {
+        MaterialTheme.colorScheme.primary
+    }
+    Box(
+        modifier = modifier
+            .fillMaxHeight()
+            .semantics(mergeDescendants = true) {
+                role = Role.Button
+                contentDescription = "记$label"
+                this.selected = selected
+            }
+            .clickable(enabled = enabled) { onSelect(type) },
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(36.dp)
+                .padding(2.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(if (selected) selectedContainer else Color.Transparent)
+                .then(
+                    if (selected) {
+                        Modifier.border(1.dp, selectedOutline, RoundedCornerShape(16.dp))
+                    } else {
+                        Modifier
+                    }
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelLarge,
+                color = if (selected) selectedContent else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun RecentNoteField(
+    note: String,
+    onNoteChange: (String) -> Unit,
+    enabled: Boolean,
+    noteFocusRequester: FocusRequester,
+    onFocusChanged: (Boolean) -> Unit,
+    showPopup: Boolean,
+    suggestions: List<UiRecentNoteSuggestion>,
+    editorTopPx: Int,
+    onDismissPopup: () -> Unit,
+    onSuggestionClick: (UiRecentNoteSuggestion) -> Unit,
+) {
+    var fieldBounds by remember { mutableStateOf(Rect.Zero) }
+    val density = LocalDensity.current
+    val popupWidth = with(density) { fieldBounds.width.toDp() }
+    val safeTopPx = editorTopPx + with(density) { 48.dp.roundToPx() }
+    val popupGapPx = with(density) { 6.dp.roundToPx() }
+    val availableHeight = with(density) {
+        (fieldBounds.top.toInt() - safeTopPx - popupGapPx).coerceAtLeast(0).toDp()
+    }
+    val popupHeight = minOf(availableHeight, 192.dp)
+    val popupIsVisible = showPopup && fieldBounds.width > 0f && popupHeight >= 48.dp
+
+    BackHandler(enabled = popupIsVisible) {
+        onDismissPopup()
+    }
+
+    Box(modifier = Modifier.fillMaxWidth()) {
+        OutlinedTextField(
+            value = note,
+            onValueChange = onNoteChange,
+            modifier = Modifier
+                .fillMaxWidth()
+                .focusRequester(noteFocusRequester)
+                .onFocusChanged { onFocusChanged(it.isFocused) }
+                .onGloballyPositioned { fieldBounds = it.boundsInWindow() }
+                .testTag("entry_note"),
+            enabled = enabled,
+            label = { Text("备注") },
+            supportingText = { Text("${note.length}/100") },
+            singleLine = true,
+            shape = RoundedCornerShape(10.dp),
+        )
+
+        if (popupIsVisible) {
+            Popup(
+                popupPositionProvider = RecentNotePopupPositionProvider(
+                    safeTopPx = safeTopPx,
+                    gapPx = popupGapPx,
+                ),
+                onDismissRequest = onDismissPopup,
+                properties = PopupProperties(
+                    focusable = false,
+                    dismissOnBackPress = false,
+                    dismissOnClickOutside = true,
+                    clippingEnabled = true,
+                ),
+            ) {
+                Surface(
+                    modifier = Modifier
+                        .width(popupWidth)
+                        .heightIn(max = popupHeight)
+                        .testTag("recent_note_popup")
+                        .semantics { contentDescription = "最近使用备注" },
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.surface,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    shadowElevation = 6.dp,
+                ) {
+                    LazyColumn {
+                        items(
+                            items = suggestions.take(10),
+                            key = { it.normalizedNote },
+                        ) { suggestion ->
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(48.dp)
+                                    .semantics {
+                                        role = Role.Button
+                                        contentDescription = "使用最近备注：${suggestion.note}"
+                                    }
+                                    .clickable { onSuggestionClick(suggestion) }
+                                    .padding(horizontal = 12.dp),
+                                contentAlignment = Alignment.CenterStart,
+                            ) {
+                                Text(
+                                    text = suggestion.note,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private class RecentNotePopupPositionProvider(
+    private val safeTopPx: Int,
+    private val gapPx: Int,
+) : PopupPositionProvider {
+    override fun calculatePosition(
+        anchorBounds: IntRect,
+        windowSize: IntSize,
+        layoutDirection: LayoutDirection,
+        popupContentSize: IntSize,
+    ): IntOffset {
+        val x = anchorBounds.left.coerceIn(
+            0,
+            (windowSize.width - popupContentSize.width).coerceAtLeast(0),
+        )
+        val preferredY = anchorBounds.top - gapPx - popupContentSize.height
+        val y = preferredY.coerceAtLeast(safeTopPx).coerceAtMost(
+            (windowSize.height - popupContentSize.height).coerceAtLeast(0),
+        )
+        return IntOffset(x, y)
     }
 }
 
@@ -793,39 +1061,6 @@ private fun entryAmountTransition() = ContentTransform(
     sizeTransform = null,
 )
 
-@Composable
-private fun HistoryTemplateRow(
-    templates: List<UiHistoryTemplate>,
-    onTemplateClick: (UiHistoryTemplate) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    LazyRow(
-        modifier = modifier
-            .fillMaxWidth()
-            .height(72.dp),
-        contentPadding = PaddingValues(end = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        items(templates.take(8), key = { "${it.amountCents}-${it.note}" }) { template ->
-            SakuCard(onClick = { onTemplateClick(template) }) {
-                Column(
-                    modifier = Modifier.width(132.dp).padding(horizontal = 10.dp, vertical = 8.dp)
-                ) {
-                    Text(formatMoney(template.amountCents), style = MaterialTheme.typography.labelLarge)
-                    Text(
-                        template.note.ifBlank { "无备注" },
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-            }
-        }
-    }
-}
-
 private data class KeySpec(val label: String, val semanticLabel: String = label)
 
 private val EntryKeyRows = listOf(
@@ -1015,26 +1250,6 @@ internal fun SakuDatePickerDialog(
     val days = remember(selectedYear, selectedMonth, today) {
         (1..maxDayFor(selectedYear, selectedMonth, today)).toList()
     }
-    val yearState = rememberLazyListState(
-        initialFirstVisibleItemIndex = (years.indexOf(selectedYear) - 2).coerceAtLeast(0)
-    )
-    val monthState = rememberLazyListState(
-        initialFirstVisibleItemIndex = (months.indexOf(selectedMonth) - 2).coerceAtLeast(0)
-    )
-    val dayState = rememberLazyListState(
-        initialFirstVisibleItemIndex = (days.indexOf(selectedDay) - 2).coerceAtLeast(0)
-    )
-
-    LaunchedEffect(years, selectedYear) {
-        yearState.scrollToItem((years.indexOf(selectedYear) - 2).coerceAtLeast(0))
-    }
-    LaunchedEffect(months, selectedMonth) {
-        monthState.scrollToItem((months.indexOf(selectedMonth) - 2).coerceAtLeast(0))
-    }
-    LaunchedEffect(days, selectedDay) {
-        dayState.scrollToItem((days.indexOf(selectedDay) - 2).coerceAtLeast(0))
-    }
-
     AlertDialog(
         onDismissRequest = onDismiss,
         shape = RoundedCornerShape(10.dp),
@@ -1044,11 +1259,10 @@ internal fun SakuDatePickerDialog(
                 modifier = Modifier.fillMaxWidth().height(248.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                SakuDateColumn(
+                SakuNumberPickerColumn(
                     label = "年",
                     values = years,
                     selected = selectedYear,
-                    state = yearState,
                     onSelect = { nextYear ->
                         selectedYear = nextYear
                         selectedMonth = selectedMonth.coerceAtMost(maxMonthFor(nextYear, today))
@@ -1058,11 +1272,10 @@ internal fun SakuDatePickerDialog(
                     },
                     modifier = Modifier.weight(1.25f)
                 )
-                SakuDateColumn(
+                SakuNumberPickerColumn(
                     label = "月",
                     values = months,
                     selected = selectedMonth,
-                    state = monthState,
                     onSelect = { nextMonth ->
                         selectedMonth = nextMonth
                         selectedDay = selectedDay.coerceAtMost(
@@ -1071,11 +1284,10 @@ internal fun SakuDatePickerDialog(
                     },
                     modifier = Modifier.weight(0.9f)
                 )
-                SakuDateColumn(
+                SakuNumberPickerColumn(
                     label = "日",
                     values = days,
                     selected = selectedDay,
-                    state = dayState,
                     onSelect = { selectedDay = it },
                     modifier = Modifier.weight(0.9f)
                 )
@@ -1090,66 +1302,6 @@ internal fun SakuDatePickerDialog(
             TextButton(onClick = onDismiss) { Text("取消") }
         }
     )
-}
-
-@Composable
-private fun SakuDateColumn(
-    label: String,
-    values: List<Int>,
-    selected: Int,
-    state: LazyListState,
-    onSelect: (Int) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Column(modifier = modifier.fillMaxHeight()) {
-        Text(
-            label,
-            modifier = Modifier.fillMaxWidth().height(40.dp).padding(top = 8.dp),
-            textAlign = TextAlign.Center,
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        LazyColumn(
-            state = state,
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f)
-                .clip(RoundedCornerShape(10.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant),
-            contentPadding = PaddingValues(vertical = 4.dp),
-            verticalArrangement = Arrangement.spacedBy(2.dp)
-        ) {
-            items(values, key = { "$label-$it" }) { value ->
-                val isSelected = value == selected
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(48.dp)
-                        .padding(horizontal = 3.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(
-                            if (isSelected) MaterialTheme.colorScheme.primaryContainer
-                            else Color.Transparent
-                        )
-                        .semantics {
-                            role = Role.Button
-                            contentDescription = "$label：$value"
-                            this.selected = isSelected
-                        }
-                        .clickable { onSelect(value) },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        value.toString(),
-                        style = if (isSelected) MaterialTheme.typography.titleMedium
-                        else MaterialTheme.typography.bodyMedium,
-                        color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer
-                        else MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-        }
-    }
 }
 
 private fun defaultCategoryId(

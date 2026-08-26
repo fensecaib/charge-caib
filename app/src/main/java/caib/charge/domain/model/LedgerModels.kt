@@ -52,6 +52,23 @@ data class LedgerEntryDraft(
     val note: String = "",
 )
 
+/**
+ * A transactional, field-scoped update for the high-frequency inline editors.
+ *
+ * Keeping these intents explicit prevents a stale UI snapshot from overwriting fields that the
+ * user did not edit while an inline editor was open.
+ */
+sealed interface LedgerEntryPatch {
+    data class AmountAndDate(
+        val amountCents: Long,
+        val entryDate: LocalDate,
+    ) : LedgerEntryPatch
+
+    data class Note(val note: String) : LedgerEntryPatch
+
+    data class Category(val categoryId: String) : LedgerEntryPatch
+}
+
 data class DetailFilter(
     val startEpochDay: Long? = null,
     val endEpochDay: Long? = null,
@@ -209,8 +226,8 @@ data class NoteBreakdownSlice(
     val isOther: Boolean get() = isRemainder
 }
 
-data class HistoryTemplate(
-    val amountCents: Long,
+/** A note-only recommendation; selecting it must never change amount or date fields. */
+data class RecentNoteSuggestion(
     val note: String,
     val normalizedNote: String,
     val lastCreatedAt: Long,

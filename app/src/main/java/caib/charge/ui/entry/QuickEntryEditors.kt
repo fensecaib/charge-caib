@@ -29,6 +29,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -59,7 +60,7 @@ fun QuickAmountEditorOverlay(
     today: LocalDate,
     isSaving: Boolean,
     onDismiss: () -> Unit,
-    onSave: (EntrySheetResult) -> Unit,
+    onSave: (amountCents: Long, date: LocalDate) -> Unit,
 ) {
     val initialExpression = remember(entry.id) { centsToExpression(entry.amountCents) }
     var expression by rememberSaveable(entry.id) { mutableStateOf(initialExpression) }
@@ -70,34 +71,32 @@ fun QuickAmountEditorOverlay(
     val evaluation = remember(expression) { AmountExpressionEngine.evaluate(expression) }
     val dirty = expression != initialExpression || date != entry.date
     val density = LocalDensity.current
-
-    fun requestDismiss() {
-        when {
-            isSaving -> Unit
-            dirty -> showDiscardConfirm = true
-            else -> onDismiss()
+    val currentEvaluation = rememberUpdatedState(evaluation)
+    val currentDate = rememberUpdatedState(date)
+    val currentDirty = rememberUpdatedState(dirty)
+    val currentIsSaving = rememberUpdatedState(isSaving)
+    val currentOnDismiss = rememberUpdatedState(onDismiss)
+    val currentOnSave = rememberUpdatedState(onSave)
+    val requestDismiss: () -> Unit = remember(entry.id) {
+        {
+            when {
+                currentIsSaving.value -> Unit
+                currentDirty.value -> showDiscardConfirm = true
+                else -> currentOnDismiss.value()
+            }
+        }
+    }
+    val save: () -> Unit = remember(entry.id) {
+        save@{
+            val cents = currentEvaluation.value.resultCents ?: return@save
+            if (currentIsSaving.value) return@save
+            currentOnSave.value(cents, currentDate.value)
         }
     }
 
-    fun save() {
-        val cents = evaluation.resultCents ?: return
-        if (isSaving) return
-        onSave(
-            EntrySheetResult(
-                id = entry.id,
-                type = entry.type,
-                categoryId = entry.categoryId,
-                amountCents = cents,
-                date = date,
-                note = entry.note,
-                originalDate = entry.date,
-            )
-        )
-    }
-
-    BackHandler { requestDismiss() }
+    BackHandler(onBack = requestDismiss)
     Box(Modifier.fillMaxSize()) {
-        Box(Modifier.fillMaxSize().background(Color(0x522C4A5A)).clickable(onClick = ::requestDismiss))
+        Box(Modifier.fillMaxSize().background(Color(0x522C4A5A)).clickable(onClick = requestDismiss))
 
         val width = with(density) { sourceBoundsInWindow.width.toDp() }
         val height = with(density) { sourceBoundsInWindow.height.toDp() }
@@ -151,7 +150,7 @@ fun QuickAmountEditorOverlay(
                     isSaving = isSaving,
                     onExpressionChange = { expression = it },
                     onDateClick = { showDatePicker = true },
-                    onSave = ::save,
+                    onSave = save,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                 )
             }
@@ -176,7 +175,10 @@ fun QuickAmountEditorOverlay(
             title = { Text("放弃金额修改？") },
             text = { Text("尚未保存的金额或日期将不会保留。") },
             confirmButton = {
-                TextButton(onClick = onDismiss, enabled = !isSaving) { Text("放弃") }
+                TextButton(
+                    onClick = { currentOnDismiss.value() },
+                    enabled = !isSaving,
+                ) { Text("放弃") }
             },
             dismissButton = { TextButton(onClick = { showDiscardConfirm = false }) { Text("继续修改") } },
         )
@@ -188,7 +190,7 @@ fun QuickNoteEditorDialog(
     entry: UiLedgerEntry,
     isSaving: Boolean,
     onDismiss: () -> Unit,
-    onSave: (EntrySheetResult) -> Unit,
+    onSave: (String) -> Unit,
 ) {
     var note by rememberSaveable(entry.id) { mutableStateOf(entry.note) }
     val focusRequester = remember { FocusRequester() }
@@ -217,17 +219,7 @@ fun QuickNoteEditorDialog(
         confirmButton = {
             SakuCtaButton(
                 onClick = {
-                    onSave(
-                        EntrySheetResult(
-                            id = entry.id,
-                            type = entry.type,
-                            categoryId = entry.categoryId,
-                            amountCents = entry.amountCents,
-                            date = entry.date,
-                            note = note.trim(),
-                            originalDate = entry.date,
-                        )
-                    )
+                    onSave(note.trim())
                 },
                 enabled = !isSaving,
             ) { Text("保存备注") }

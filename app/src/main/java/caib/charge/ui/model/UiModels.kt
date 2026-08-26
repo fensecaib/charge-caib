@@ -2,6 +2,7 @@ package caib.charge.ui.model
 
 import androidx.compose.ui.graphics.Color
 import caib.charge.domain.TextNormalizer
+import caib.charge.domain.model.EntryDateLimits
 import java.time.LocalDate
 import java.time.YearMonth
 
@@ -31,27 +32,27 @@ data class UiLedgerEntry(
     val normalizedNote: String = TextNormalizer.normalize(note),
 )
 
-data class UiHistoryTemplate(
-    val amountCents: Long,
-    val note: String
+data class UiRecentNoteSuggestion(
+    val note: String,
+    val normalizedNote: String,
 )
 
-data class UiHistoryTemplateKey(
+data class UiRecentNoteKey(
     val type: UiEntryType,
     val categoryId: String,
 )
 
 /**
- * History recommendations are meaningful only for the exact entry type/category pair that
+ * Recent-note suggestions are meaningful only for the exact entry type/category pair that
  * produced them. Keeping the key and items in one value prevents a retained StateFlow value
  * from being rendered after the editor has already switched context.
  */
-data class UiHistoryTemplateState(
-    val key: UiHistoryTemplateKey? = null,
-    val items: List<UiHistoryTemplate> = emptyList(),
+data class UiRecentNoteState(
+    val key: UiRecentNoteKey? = null,
+    val items: List<UiRecentNoteSuggestion> = emptyList(),
 ) {
-    fun itemsFor(type: UiEntryType, categoryId: String?): List<UiHistoryTemplate> =
-        if (categoryId != null && key == UiHistoryTemplateKey(type, categoryId)) items else emptyList()
+    fun itemsFor(type: UiEntryType, categoryId: String?): List<UiRecentNoteSuggestion> =
+        if (categoryId != null && key == UiRecentNoteKey(type, categoryId)) items else emptyList()
 }
 
 sealed interface UiRecentCategoriesState {
@@ -64,11 +65,20 @@ sealed interface UiRecentCategoriesState {
 
 data class UiDetailFilter(
     val month: YearMonth = YearMonth.now(),
-    val year: Int? = null,
     val type: UiEntryType? = null,
     val categoryId: String? = null,
-    val exactDate: LocalDate? = null
 )
+
+internal fun UiDetailFilter.selectMonth(
+    requested: YearMonth,
+    currentMonth: YearMonth,
+): UiDetailFilter = if (
+    requested in YearMonth.from(EntryDateLimits.MIN_DATE)..currentMonth
+) {
+    copy(month = requested)
+} else {
+    this
+}
 
 data class UiPeriodSummary(
     val incomeCents: Long = 0,

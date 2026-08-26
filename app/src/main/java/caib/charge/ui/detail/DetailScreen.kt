@@ -6,6 +6,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,12 +20,15 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ChevronLeft
 import androidx.compose.material.icons.rounded.ChevronRight
+import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.FilterAlt
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
@@ -40,6 +44,7 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
@@ -58,6 +63,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import caib.charge.domain.model.EntryDateLimits
 import caib.charge.ui.components.CategoryIcon
 import caib.charge.ui.components.SakuCard
 import caib.charge.ui.components.SakuSegmentedControl
@@ -76,6 +83,18 @@ import caib.charge.ui.util.formatSignedMoney
 import java.time.LocalDate
 import java.time.YearMonth
 
+private val DetailDayHeaderHeight = 36.dp
+private val DetailDayHeaderAccentWidth = 4.dp
+private val DetailLedgerRowHeight = 48.dp
+private val DetailCategoryHotspotWidth = 84.dp
+private val DetailCategoryBadgeHeight = 28.dp
+private val DetailAmountHotspotWidth = 108.dp
+private val DetailAmountAutoSize = TextAutoSize.StepBased(
+    minFontSize = 11.sp,
+    maxFontSize = 14.sp,
+    stepSize = 1.sp,
+)
+
 @Composable
 fun DetailScreen(
     filter: UiDetailFilter,
@@ -88,10 +107,10 @@ fun DetailScreen(
     onCategoryFilter: (String?) -> Unit,
     onEntryClick: (UiLedgerEntry) -> Unit,
     modifier: Modifier = Modifier,
+    onPeriodPickerRequest: (() -> Unit)? = null,
     onCategoryHotspotClick: (UiLedgerEntry) -> Unit = onEntryClick,
     onInfoHotspotClick: (UiLedgerEntry) -> Unit = onEntryClick,
-    onAmountHotspotClick: (UiLedgerEntry) -> Unit = onEntryClick,
-    onAmountHotspotBoundsClick: ((UiLedgerEntry, Rect) -> Unit)? = null,
+    onAmountHotspotClick: (UiLedgerEntry, Rect) -> Unit = { entry, _ -> onEntryClick(entry) },
     onDeleteRequest: ((UiLedgerEntry) -> Unit)? = null,
     recentlyCreatedEntryId: Long? = null,
     onInsertAnimationFinished: (Long) -> Unit = {},
@@ -100,8 +119,18 @@ fun DetailScreen(
     val grouped = remember(entries) {
         entries.groupBy { it.date }.toList().sortedByDescending { it.first }
     }
+    val listState = rememberLazyListState()
+    val filterSelectionKey = "${filter.month}|${filter.type?.name.orEmpty()}|${filter.categoryId.orEmpty()}"
+    var appliedFilterSelectionKey by rememberSaveable { mutableStateOf(filterSelectionKey) }
     var longPressedEntry by remember { mutableStateOf<UiLedgerEntry?>(null) }
     var deleteCandidate by remember { mutableStateOf<UiLedgerEntry?>(null) }
+
+    LaunchedEffect(filterSelectionKey) {
+        if (filterSelectionKey != appliedFilterSelectionKey) {
+            listState.scrollToItem(0)
+            appliedFilterSelectionKey = filterSelectionKey
+        }
+    }
 
     Column(
         modifier = modifier
@@ -110,12 +139,14 @@ fun DetailScreen(
     ) {
         DetailTopBar(
             filter = filter,
-            canNext = filter.year?.let { it < today.year }
-                ?: (filter.month < YearMonth.from(today)),
+            canPrevious = filter.month > YearMonth.from(EntryDateLimits.MIN_DATE),
+            canNext = filter.month < YearMonth.from(today),
             onPrevious = onPreviousMonth,
-            onNext = onNextMonth
+            onNext = onNextMonth,
+            onPeriodPickerRequest = onPeriodPickerRequest,
         )
         LazyColumn(
+            state = listState,
             modifier = Modifier.fillMaxSize().testTag("detail_list"),
             contentPadding = PaddingValues(
                 start = 12.dp,
@@ -126,7 +157,7 @@ fun DetailScreen(
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             item(key = "summary") {
-                CompactSummaryCard(summary = summary, annual = filter.year != null)
+                CompactSummaryCard(summary = summary)
             }
             item(key = "filters") {
                 CompactFilterRow(
@@ -141,14 +172,11 @@ fun DetailScreen(
             } else {
                 items(grouped, key = { "day-${it.first}" }) { (date, dayEntries) ->
                     DayLedgerCard(
-                        dateLabel = formatDay(date),
+                        date = date,
                         entries = dayEntries,
                         onCategoryClick = onCategoryHotspotClick,
                         onInfoClick = onInfoHotspotClick,
-                        onAmountClick = { entry, bounds ->
-                            if (onAmountHotspotBoundsClick != null) onAmountHotspotBoundsClick(entry, bounds)
-                            else onAmountHotspotClick(entry)
-                        },
+                        onAmountClick = onAmountHotspotClick,
                         onLongClick = { longPressedEntry = it },
                         recentlyCreatedEntryId = recentlyCreatedEntryId,
                         onInsertAnimationFinished = onInsertAnimationFinished,
@@ -209,21 +237,49 @@ fun DetailScreen(
 @Composable
 private fun DetailTopBar(
     filter: UiDetailFilter,
+    canPrevious: Boolean,
     canNext: Boolean,
     onPrevious: () -> Unit,
-    onNext: () -> Unit
+    onNext: () -> Unit,
+    onPeriodPickerRequest: (() -> Unit)?,
 ) {
+    val periodLabel = formatMonth(filter.month)
     SakuTopBar(
         title = "明细",
         actions = {
-            IconButton(onClick = onPrevious, modifier = Modifier.size(48.dp)) {
+            IconButton(onClick = onPrevious, enabled = canPrevious, modifier = Modifier.size(48.dp)) {
                 Icon(Icons.Rounded.ChevronLeft, contentDescription = "上一个月")
             }
-            Text(
-                filter.year?.let { "${it}年" } ?: formatMonth(filter.month),
-                style = MaterialTheme.typography.labelLarge,
-                maxLines = 1
-            )
+            if (onPeriodPickerRequest != null) {
+                TextButton(
+                    onClick = onPeriodPickerRequest,
+                    modifier = Modifier
+                        .height(48.dp)
+                        .testTag("detail_period_picker")
+                        .semantics { contentDescription = "选择月份：$periodLabel" },
+                    contentPadding = PaddingValues(horizontal = 8.dp),
+                ) {
+                    Text(
+                        periodLabel,
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onBackground,
+                        maxLines = 1,
+                    )
+                    Icon(
+                        Icons.Rounded.ExpandMore,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            } else {
+                Text(
+                    periodLabel,
+                    modifier = Modifier.testTag("detail_period_label"),
+                    style = MaterialTheme.typography.labelLarge,
+                    maxLines = 1,
+                )
+            }
             IconButton(onClick = onNext, enabled = canNext, modifier = Modifier.size(48.dp)) {
                 Icon(Icons.Rounded.ChevronRight, contentDescription = "下一个月")
             }
@@ -232,7 +288,7 @@ private fun DetailTopBar(
 }
 
 @Composable
-private fun CompactSummaryCard(summary: UiPeriodSummary, annual: Boolean) {
+private fun CompactSummaryCard(summary: UiPeriodSummary) {
     SakuCard(modifier = Modifier.fillMaxWidth().testTag("detail_summary")) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
@@ -240,7 +296,7 @@ private fun CompactSummaryCard(summary: UiPeriodSummary, annual: Boolean) {
         ) {
             Column(modifier = Modifier.weight(1.15f)) {
                 Text(
-                    if (annual) "本年结余" else "本月结余",
+                    "本月结余",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -344,7 +400,7 @@ private fun CompactFilterRow(
 
 @Composable
 private fun DayLedgerCard(
-    dateLabel: String,
+    date: LocalDate,
     entries: List<UiLedgerEntry>,
     onCategoryClick: (UiLedgerEntry) -> Unit,
     onInfoClick: (UiLedgerEntry) -> Unit,
@@ -353,6 +409,8 @@ private fun DayLedgerCard(
     recentlyCreatedEntryId: Long?,
     onInsertAnimationFinished: (Long) -> Unit,
 ) {
+    val dateLabel = formatDay(date)
+    val dayKey = date.toEpochDay()
     val (expense, income) = remember(entries) {
         var expenseTotal = 0L
         var incomeTotal = 0L
@@ -367,24 +425,47 @@ private fun DayLedgerCard(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(42.dp)
-                    .padding(horizontal = 10.dp)
-                    .testTag("detail_day_header_$dateLabel"),
+                    .height(DetailDayHeaderHeight)
+                    .background(MaterialTheme.colorScheme.primaryContainer)
+                    .testTag("detail_day_header_$dayKey"),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text(dateLabel, style = MaterialTheme.typography.labelLarge)
-                Text(
-                    buildString {
-                        if (income > 0L) append("收 ${formatMoney(income)}")
-                        if (income > 0L && expense > 0L) append(" · ")
-                        if (expense > 0L) append("支 ${formatMoney(expense)}")
-                    },
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                Box(
+                    modifier = Modifier
+                        .width(DetailDayHeaderAccentWidth)
+                        .fillMaxHeight()
+                        .background(MaterialTheme.colorScheme.primary)
+                        .testTag("detail_day_accent_$dayKey"),
                 )
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .padding(start = 8.dp, end = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        dateLabel,
+                        modifier = Modifier.weight(0.9f),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        buildString {
+                            if (income > 0L) append("收 ${formatMoney(income)}")
+                            if (income > 0L && expense > 0L) append(" · ")
+                            if (expense > 0L) append("支 ${formatMoney(expense)}")
+                        },
+                        modifier = Modifier.weight(1.35f),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        textAlign = TextAlign.End,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             entries.forEachIndexed { index, entry ->
@@ -447,8 +528,8 @@ private fun AnimatedLedgerHotspotRow(
         label = "detail_entry_insert_${entry.id}",
     )
     LaunchedEffect(entry.id) { reveal = true }
-    val contentHeight = 64f + if (showDivider) 1f else 0f
-    val translation = with(androidx.compose.ui.platform.LocalDensity.current) { 10.dp.toPx() }
+    val contentHeight = DetailLedgerRowHeight + if (showDivider) 1.dp else 0.dp
+    val translation = with(androidx.compose.ui.platform.LocalDensity.current) { 8.dp.toPx() }
     val highlightColor = MaterialTheme.colorScheme.tertiary
 
     Box(
@@ -456,8 +537,9 @@ private fun AnimatedLedgerHotspotRow(
             .fillMaxWidth()
             // Reserve the final row height once; only pixels animate. This avoids recomposing and
             // remeasuring the whole day card on every frame of the 220ms insertion feedback.
-            .height(contentHeight.dp)
-            .clipToBounds(),
+            .height(contentHeight)
+            .clipToBounds()
+            .testTag("detail_entry_insert_container_${entry.id}"),
     ) {
         Column(
             modifier = Modifier
@@ -503,7 +585,7 @@ private fun LedgerHotspotRowBlock(
     )
     if (showDivider) {
         HorizontalDivider(
-            modifier = Modifier.padding(start = 96.dp),
+            modifier = Modifier.padding(start = DetailCategoryHotspotWidth),
             color = MaterialTheme.colorScheme.outlineVariant,
         )
     }
@@ -524,15 +606,14 @@ private fun LedgerHotspotRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(64.dp)
+            .height(DetailLedgerRowHeight)
             .testTag("detail_entry_row_${entry.id}"),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(
+        Box(
             modifier = Modifier
-                .width(96.dp)
+                .width(DetailCategoryHotspotWidth)
                 .fillMaxHeight()
-                .background(categoryTint.copy(alpha = 0.10f))
                 .testTag("detail_category_hotspot_${entry.id}")
                 .semantics {
                     role = Role.Button
@@ -540,24 +621,44 @@ private fun LedgerHotspotRow(
                 }
                 .combinedClickable(onClick = onCategoryClick, onLongClick = onLongClick)
                 .padding(horizontal = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+            contentAlignment = Alignment.CenterStart,
         ) {
-            Box(
+            val badgeShape = RoundedCornerShape(7.dp)
+            Row(
                 modifier = Modifier
-                    .size(32.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(categoryTint.copy(alpha = 0.22f)),
-                contentAlignment = Alignment.Center
+                    .widthIn(max = 72.dp)
+                    .height(DetailCategoryBadgeHeight)
+                    .clip(badgeShape)
+                    .background(categoryTint.copy(alpha = 0.10f))
+                    .testTag("detail_category_badge_${entry.id}"),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                CategoryIcon(entry.categoryIconKey, contentDescription = null, modifier = Modifier.size(18.dp))
+                Box(
+                    modifier = Modifier
+                        .size(28.dp)
+                        .testTag("detail_category_icon_container_${entry.id}"),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    CategoryIcon(
+                        entry.categoryIconKey,
+                        contentDescription = null,
+                        modifier = Modifier
+                            .size(16.dp)
+                            .testTag("detail_category_icon_${entry.id}"),
+                    )
+                }
+                Text(
+                    entry.categoryName,
+                    modifier = Modifier
+                        .widthIn(max = 44.dp)
+                        .padding(end = 4.dp),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
-            Text(
-                entry.categoryName,
-                style = MaterialTheme.typography.labelLarge,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
         }
 
         Box(
@@ -575,7 +676,7 @@ private fun LedgerHotspotRow(
         ) {
             Text(
                 entry.note.ifBlank { entry.categoryName },
-                style = MaterialTheme.typography.bodyMedium,
+                style = MaterialTheme.typography.labelMedium,
                 color = if (entry.note.isBlank()) MaterialTheme.colorScheme.onSurfaceVariant
                 else MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
@@ -586,9 +687,9 @@ private fun LedgerHotspotRow(
         var amountBounds by remember(entry.id) { mutableStateOf(Rect.Zero) }
         Box(
             modifier = Modifier
-                .width(112.dp)
+                .width(DetailAmountHotspotWidth)
                 .fillMaxHeight()
-                .background(amountTint.copy(alpha = 0.08f))
+                .background(amountTint.copy(alpha = 0.06f))
                 .testTag("detail_amount_hotspot_${entry.id}")
                 .semantics {
                     role = Role.Button
@@ -599,29 +700,17 @@ private fun LedgerHotspotRow(
                 .padding(horizontal = 6.dp),
             contentAlignment = Alignment.CenterEnd
         ) {
-            Column(
+            Text(
+                formatSignedMoney(entry.amountCents, entry.type == UiEntryType.INCOME),
                 modifier = Modifier.fillMaxWidth(),
-                horizontalAlignment = Alignment.End,
-                verticalArrangement = Arrangement.Center,
-            ) {
-                Text(
-                    formatSignedMoney(entry.amountCents, entry.type == UiEntryType.INCOME),
-                    modifier = Modifier.fillMaxWidth(),
-                    textAlign = TextAlign.End,
-                    style = MaterialTheme.typography.labelLarge,
-                    color = amountTint,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    "${entry.date.monthValue}/${entry.date.dayOfMonth}",
-                    modifier = Modifier.fillMaxWidth(),
-                    textAlign = TextAlign.End,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                )
-            }
+                textAlign = TextAlign.End,
+                style = MaterialTheme.typography.labelLarge,
+                color = amountTint,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Clip,
+                autoSize = DetailAmountAutoSize,
+            )
         }
     }
 }

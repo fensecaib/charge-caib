@@ -16,12 +16,13 @@ import caib.charge.domain.model.DetailFilter
 import caib.charge.domain.model.EntryDateLimits
 import caib.charge.domain.model.EntrySource
 import caib.charge.domain.model.EntryType
-import caib.charge.domain.model.HistoryTemplate
 import caib.charge.domain.model.LedgerEntry
 import caib.charge.domain.model.LedgerEntryDraft
+import caib.charge.domain.model.LedgerEntryPatch
 import caib.charge.domain.model.LedgerStats
 import caib.charge.domain.model.MoneyLimits
 import caib.charge.domain.model.PeriodSummary
+import caib.charge.domain.model.RecentNoteSuggestion
 import caib.charge.domain.model.TrendPoint
 import caib.charge.domain.repository.LedgerRepository
 import caib.charge.di.ApplicationScope
@@ -213,27 +214,38 @@ class DefaultLedgerRepository private constructor(
         }.sortedByDescending { it.amountCents }
     }.flowOn(computationDispatcher)
 
-    override fun observeHistoryTemplates(
+    override fun observeRecentNotes(
         type: EntryType,
         categoryId: String,
         limit: Int,
-    ): Flow<List<HistoryTemplate>> {
-        require(limit in 1..100) { "历史模板数量必须在 1 到 100 之间" }
+    ): Flow<List<RecentNoteSuggestion>> {
+        require(limit in 1..100) { "最近备注数量必须在 1 到 100 之间" }
         return entries.map { rows ->
-            val latest = mutableMapOf<Pair<Long, String>, LedgerEntry>()
+            val latest = mutableMapOf<String, LedgerEntry>()
             rows.forEach { entry ->
-                if (entry.type == type && entry.category.id == categoryId) {
-                    val key = entry.amountCents to entry.normalizedNote
-                    val previous = latest[key]
-                    if (previous == null || entry.createdAt > previous.createdAt) latest[key] = entry
+                if (
+                    entry.type == type &&
+                    entry.category.id == categoryId &&
+                    entry.normalizedNote.isNotBlank()
+                ) {
+                    val previous = latest[entry.normalizedNote]
+                    if (
+                        previous == null ||
+                        entry.createdAt > previous.createdAt ||
+                        (entry.createdAt == previous.createdAt && entry.id > previous.id)
+                    ) {
+                        latest[entry.normalizedNote] = entry
+                    }
                 }
             }
             latest.values.asSequence()
-                .sortedByDescending { it.createdAt }
+                .sortedWith(
+                    compareByDescending<LedgerEntry> { it.createdAt }
+                        .thenByDescending { it.id }
+                )
                 .take(limit)
                 .map {
-                    HistoryTemplate(
-                        amountCents = it.amountCents,
+                    RecentNoteSuggestion(
                         note = it.note,
                         normalizedNote = it.normalizedNote,
                         lastCreatedAt = it.createdAt,
@@ -255,49 +267,91 @@ class DefaultLedgerRepository private constructor(
         ledgerDao.getMostRecentActiveCategoryId(type)
 
     override suspend fun upsert(draft: LedgerEntryDraft): Long {
-        val note = draft.note.trim()
-        validateDraft(draft, note)
-        val normalizedNote = TextNormalizer.normalize(note)
         var savedId: Long? = null
         transactionRunner.run {
-            val category = categoryDao.getById(draft.categoryId)
-                ?: throw DomainValidationException("分类不存在")
-            if (category.type != draft.type) throw DomainValidationException("分类与收支类型不匹配")
             val existing = draft.id?.let { ledgerDao.getById(it) }
             if (draft.id != null && existing == null) throw DomainValidationException("账目不存在")
-            if (category.isArchived && existing?.categoryId != category.id) {
-                throw DomainValidationException("不能使用已归档分类新建账目")
-            }
-
-            val now = clock.millis()
-            val entity = LedgerEntryEntity(
-                id = existing?.id ?: 0,
-                type = draft.type,
-                categoryId = category.id,
-                amountCents = draft.amountCents,
-                entryDateEpochDay = draft.entryDate.toEpochDay(),
-                note = note,
-                normalizedNote = normalizedNote,
-                source = existing?.source ?: EntrySource.MANUAL,
-                importBatchId = existing?.importBatchId,
-                contentFingerprint = Fingerprints.entry(
-                    draft.entryDate,
-                    draft.type,
-                    draft.amountCents,
-                    category.id,
-                    normalizedNote,
-                ),
-                createdAt = existing?.createdAt ?: now,
-                updatedAt = now,
-            )
-            savedId = if (existing == null) {
-                ledgerDao.insert(entity)
-            } else {
-                if (ledgerDao.update(entity) != 1) throw DomainValidationException("账目已不存在")
-                entity.id
-            }
+            savedId = persistDraft(draft, existing)
         }
         return checkNotNull(savedId) { "账目保存事务未返回结果" }
+    }
+
+    override suspend fun update(id: Long, patch: LedgerEntryPatch): Long {
+        var savedId: Long? = null
+        transactionRunner.run {
+            val existing = ledgerDao.getById(id) ?: throw DomainValidationException("账目不存在")
+            val draft = when (patch) {
+                is LedgerEntryPatch.AmountAndDate -> LedgerEntryDraft(
+                    id = id,
+                    type = existing.type,
+                    categoryId = existing.categoryId,
+                    amountCents = patch.amountCents,
+                    entryDate = patch.entryDate,
+                    note = existing.note,
+                )
+                is LedgerEntryPatch.Note -> LedgerEntryDraft(
+                    id = id,
+                    type = existing.type,
+                    categoryId = existing.categoryId,
+                    amountCents = existing.amountCents,
+                    entryDate = LocalDate.ofEpochDay(existing.entryDateEpochDay),
+                    note = patch.note,
+                )
+                is LedgerEntryPatch.Category -> LedgerEntryDraft(
+                    id = id,
+                    type = existing.type,
+                    categoryId = patch.categoryId,
+                    amountCents = existing.amountCents,
+                    entryDate = LocalDate.ofEpochDay(existing.entryDateEpochDay),
+                    note = existing.note,
+                )
+            }
+            savedId = persistDraft(draft, existing)
+        }
+        return checkNotNull(savedId) { "账目更新事务未返回结果" }
+    }
+
+    private suspend fun persistDraft(
+        draft: LedgerEntryDraft,
+        existing: LedgerEntryEntity?,
+    ): Long {
+        val note = draft.note.trim()
+        validateDraft(draft, note)
+        val category = categoryDao.getById(draft.categoryId)
+            ?: throw DomainValidationException("分类不存在")
+        if (category.type != draft.type) throw DomainValidationException("分类与收支类型不匹配")
+        if (category.isArchived && existing?.categoryId != category.id) {
+            throw DomainValidationException("不能使用已归档分类新建账目")
+        }
+
+        val normalizedNote = TextNormalizer.normalize(note)
+        val now = clock.millis()
+        val entity = LedgerEntryEntity(
+            id = existing?.id ?: 0,
+            type = draft.type,
+            categoryId = category.id,
+            amountCents = draft.amountCents,
+            entryDateEpochDay = draft.entryDate.toEpochDay(),
+            note = note,
+            normalizedNote = normalizedNote,
+            source = existing?.source ?: EntrySource.MANUAL,
+            importBatchId = existing?.importBatchId,
+            contentFingerprint = Fingerprints.entry(
+                draft.entryDate,
+                draft.type,
+                draft.amountCents,
+                category.id,
+                normalizedNote,
+            ),
+            createdAt = existing?.createdAt ?: now,
+            updatedAt = now,
+        )
+        return if (existing == null) {
+            ledgerDao.insert(entity)
+        } else {
+            if (ledgerDao.update(entity) != 1) throw DomainValidationException("账目已不存在")
+            entity.id
+        }
     }
 
     override suspend fun delete(id: Long): LedgerEntry? {

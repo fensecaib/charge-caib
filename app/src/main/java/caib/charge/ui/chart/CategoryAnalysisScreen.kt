@@ -1,8 +1,8 @@
 package caib.charge.ui.chart
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,14 +18,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.ArrowBack
-import androidx.compose.material.icons.rounded.ChevronLeft
-import androidx.compose.material.icons.rounded.ChevronRight
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -39,6 +37,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -56,6 +55,7 @@ import caib.charge.ui.model.UiLedgerEntry
 import caib.charge.ui.model.UiNoteBreakdownSlice
 import caib.charge.ui.theme.CategoryPalette
 import caib.charge.ui.util.formatMoney
+import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import kotlin.math.PI
 import kotlin.math.atan2
@@ -97,6 +97,8 @@ fun CategoryAnalysisScreen(
     type: UiEntryType,
     period: UiChartPeriod,
     periodLabel: String,
+    periodAnchorDate: LocalDate,
+    today: LocalDate,
     points: List<UiChartPoint>,
     entries: List<UiLedgerEntry>,
     totalForTypeCents: Long,
@@ -105,16 +107,14 @@ fun CategoryAnalysisScreen(
     rankingOrder: UiEntryRankingOrder,
     onBack: () -> Unit,
     onPeriodChange: (UiChartPeriod) -> Unit,
-    onPreviousPeriod: () -> Unit,
-    onNextPeriod: () -> Unit,
-    canNextPeriod: Boolean,
+    onPeriodSelected: (LocalDate) -> Unit,
     onBreakdownSelect: (String?) -> Unit,
     onRankingOrderChange: (UiEntryRankingOrder) -> Unit,
     onEntryClick: (UiLedgerEntry) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val total = entries.sumOf { it.amountCents }
-    val divisor = points.count { !it.isFuture }.coerceAtLeast(1)
+    val total = remember(entries) { entries.sumOf { it.amountCents } }
+    val divisor = remember(points) { points.count { !it.isFuture }.coerceAtLeast(1) }
     val average = total / divisor
     val share = if (totalForTypeCents <= 0L) 0f else total.toFloat() / totalForTypeCents
     val selectedNotes = breakdown.firstOrNull { it.id == selectedBreakdownId }?.normalizedNotes
@@ -128,7 +128,7 @@ fun CategoryAnalysisScreen(
     }
 
     Column(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        CategoryTopBar(category = category, onBack = onBack)
+        CategoryTopBar(category = category, periodLabel = periodLabel, onBack = onBack)
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(16.dp, 8.dp, 16.dp, 28.dp),
@@ -143,20 +143,23 @@ fun CategoryAnalysisScreen(
                 )
             }
             item {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = onPreviousPeriod, modifier = Modifier.size(48.dp)) {
-                        Icon(Icons.Rounded.ChevronLeft, contentDescription = "上一个周期")
-                    }
-                    Text(periodLabel, modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-                    IconButton(onClick = onNextPeriod, enabled = canNextPeriod, modifier = Modifier.size(48.dp)) {
-                        Icon(Icons.Rounded.ChevronRight, contentDescription = "下一个周期")
-                    }
-                }
+                SakuPeriodRail(
+                    period = period,
+                    selectedAnchorDate = periodAnchorDate,
+                    today = today,
+                    onPeriodSelected = onPeriodSelected,
+                    contentDescriptionPrefix = "分类分析",
+                    testTagPrefix = "analysis",
+                )
             }
             item {
                 CaibCard(modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text(if (type == UiEntryType.EXPENSE) "分类支出" else "分类收入", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(
+                            "$periodLabel · ${if (type == UiEntryType.EXPENSE) "分类支出" else "分类收入"}",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                         Text(formatMoney(total), style = MaterialTheme.typography.headlineLarge)
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             SummaryValue("同期占比", "${(share * 100).roundToInt()}%")
@@ -182,12 +185,41 @@ fun CategoryAnalysisScreen(
                                 selectedId = selectedBreakdownId,
                                 onSelect = onBreakdownSelect,
                             )
+                            val allSelected = selectedBreakdownId == null
                             Surface(
-                                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable { onBreakdownSelect(null) },
-                                color = if (selectedBreakdownId == null) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(min = 48.dp)
+                                    .semantics { contentDescription = "全部备注构成" }
+                                    .selectable(
+                                        selected = allSelected,
+                                        onClick = { onBreakdownSelect(null) },
+                                        role = Role.RadioButton,
+                                    ),
+                                color = if (allSelected) MaterialTheme.colorScheme.primaryContainer
+                                else MaterialTheme.colorScheme.surfaceVariant,
+                                border = BorderStroke(
+                                    if (allSelected) 2.dp else 1.dp,
+                                    if (allSelected) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.outlineVariant,
+                                ),
                                 shape = RoundedCornerShape(8.dp),
                             ) {
-                                Box(contentAlignment = Alignment.Center) { Text("全部构成", fontWeight = FontWeight.Medium) }
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp),
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    if (allSelected) {
+                                        Icon(
+                                            Icons.Rounded.Check,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(18.dp),
+                                        )
+                                        Spacer(Modifier.size(6.dp))
+                                    }
+                                    Text("全部构成", fontWeight = FontWeight.Medium)
+                                }
                             }
                             breakdown.forEach { slice ->
                                 BreakdownLegendRow(slice, selected = slice.id == selectedBreakdownId) {
@@ -226,10 +258,14 @@ fun CategoryAnalysisScreen(
 }
 
 @Composable
-private fun CategoryTopBar(category: UiCategory?, onBack: () -> Unit) {
+private fun CategoryTopBar(
+    category: UiCategory?,
+    periodLabel: String,
+    onBack: () -> Unit,
+) {
     SakuTopBar(
         title = category?.name ?: "分类分析",
-        subtitle = if (category?.archived == true) "已归档分类" else "分类分析",
+        subtitle = "${if (category?.archived == true) "已归档" else "分类分析"} · $periodLabel",
         onBack = onBack,
         actions = {
             if (category != null) {
@@ -329,23 +365,49 @@ private fun NoteDonutChart(
 
 @Composable
 private fun BreakdownLegendRow(slice: UiNoteBreakdownSlice, selected: Boolean, onClick: () -> Unit) {
-    Row(
-        modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).background(
-            if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
-            RoundedCornerShape(8.dp),
-        ).clickable(onClick = onClick).padding(horizontal = 10.dp, vertical = 8.dp).semantics {
-            contentDescription = "备注${slice.label}，${formatMoney(slice.amountCents)}，${(slice.percentage * 100).roundToInt()}%，${slice.count}笔"
-        },
-        verticalAlignment = Alignment.CenterVertically,
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 56.dp)
+            .semantics {
+                contentDescription = "备注${slice.label}，${formatMoney(slice.amountCents)}，${(slice.percentage * 100).roundToInt()}%，${slice.count}笔"
+            }
+            .selectable(
+                selected = selected,
+                onClick = onClick,
+                role = Role.RadioButton,
+            ),
+        color = if (selected) MaterialTheme.colorScheme.primaryContainer
+        else MaterialTheme.colorScheme.surface,
+        border = BorderStroke(
+            if (selected) 2.dp else 1.dp,
+            if (selected) MaterialTheme.colorScheme.primary
+            else MaterialTheme.colorScheme.outlineVariant,
+        ),
+        shape = RoundedCornerShape(8.dp),
     ) {
-        Box(Modifier.size(12.dp).background(slice.color, CircleShape))
-        Column(Modifier.weight(1f).padding(horizontal = 10.dp)) {
-            Text(slice.label, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text("${slice.count} 笔", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        Column(horizontalAlignment = Alignment.End) {
-            Text(formatMoney(slice.amountCents), fontWeight = FontWeight.Medium)
-            Text("${(slice.percentage * 100).roundToInt()}%", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(Modifier.size(12.dp).background(slice.color, CircleShape))
+            Column(Modifier.weight(1f).padding(horizontal = 10.dp)) {
+                Text(slice.label, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text("${slice.count} 笔", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            if (selected) {
+                Icon(
+                    Icons.Rounded.Check,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+                Spacer(Modifier.size(8.dp))
+            }
+            Column(horizontalAlignment = Alignment.End) {
+                Text(formatMoney(slice.amountCents), fontWeight = FontWeight.Medium)
+                Text("${(slice.percentage * 100).roundToInt()}%", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
     }
 }
