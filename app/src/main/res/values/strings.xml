@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">彩笔记账</string>
+    <string name="quick_settings_open_app">打开彩笔记账</string>
 </resources>

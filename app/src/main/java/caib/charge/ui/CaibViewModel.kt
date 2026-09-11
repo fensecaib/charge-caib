@@ -100,6 +100,7 @@ class CaibViewModel @Inject constructor(
 
     private val messageChannel = Channel<UiMessage>(Channel.BUFFERED)
     val messages = messageChannel.receiveAsFlow()
+    internal val entrySaveFeedback = EntrySaveFeedback()
     private data class PendingUndo(val token: Long, val entry: LedgerEntry)
     private var pendingUndo: PendingUndo? = null
     private var nextUndoToken = 0L
@@ -252,13 +253,14 @@ class CaibViewModel @Inject constructor(
         onSaved: (Long) -> Unit,
     ) {
         if (!saveMutex.tryLock()) return
+        val feedbackGeneration = entrySaveFeedback.captureGeneration()
         _isSaving.value = true
         viewModelScope.launch {
             try {
                 val savedId = operation()
                 refreshRecentCategory(savedId)
                 onSaved(savedId)
-                messageChannel.send(UiMessage(successMessage))
+                entrySaveFeedback.saved(feedbackGeneration, successMessage)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {

@@ -14,6 +14,15 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface LedgerEntryDao {
+    @Query("SELECT COUNT(*) FROM ledger_entries WHERE entry_date_epoch_day BETWEEN :start AND :end")
+    suspend fun countRange(start: Long, end: Long): Long
+
+    @Query("SELECT * FROM ledger_entries WHERE entry_date_epoch_day BETWEEN :start AND :end ORDER BY created_at, id")
+    suspend fun getRange(start: Long, end: Long): List<LedgerEntryEntity>
+
+    @Query("DELETE FROM ledger_entries WHERE entry_date_epoch_day BETWEEN :start AND :end")
+    suspend fun deleteRange(start: Long, end: Long): Int
+
     @Transaction
     @Query("SELECT * FROM ledger_entries ORDER BY entry_date_epoch_day DESC, created_at DESC, id DESC")
     fun observeAllWithCategories(): Flow<List<LedgerEntryWithCategory>>

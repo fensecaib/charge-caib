@@ -130,6 +130,7 @@ fun CaibApp(
     val importBatch by viewModel.importPreview.collectAsStateWithLifecycle()
     val isImporting by viewModel.isImporting.collectAsStateWithLifecycle()
     val isSaving by viewModel.isSaving.collectAsStateWithLifecycle()
+    val saveConfirmation by viewModel.entrySaveFeedback.confirmation.collectAsStateWithLifecycle()
     val recentCategoriesState by viewModel.recentCategoriesState.collectAsStateWithLifecycle()
     val recentCategories = (recentCategoriesState as? UiRecentCategoriesState.Ready)?.categoryIds.orEmpty()
     val newEntrySeedReady = recentCategoriesState is UiRecentCategoriesState.Ready &&
@@ -162,6 +163,7 @@ fun CaibApp(
 
     LaunchedEffect(Unit) {
         viewModel.messages.collectLatest { message ->
+            viewModel.entrySaveFeedback.beginInteraction()
             snackbar.currentSnackbarData?.dismiss()
             val result = snackbar.showSnackbar(message.text, message.actionLabel)
             if (result == androidx.compose.material3.SnackbarResult.ActionPerformed) message.action?.invoke()
@@ -177,6 +179,7 @@ fun CaibApp(
     fun openEditor(entryId: Long?, mode: EntryEditorMode) {
         val key = EntryEditorKey(entryId, mode.name)
         if (navigation.activeStack.lastOrNull() == key) return
+        viewModel.entrySaveFeedback.beginInteraction()
         viewModel.prepareEditor(entryId, force = true)
         navigation.push(key)
     }
@@ -188,6 +191,7 @@ fun CaibApp(
             pendingEntrySaveMotion != null ||
             pendingEntryReturnMotion != null
         ) return
+        viewModel.entrySaveFeedback.beginInteraction()
         viewModel.prepareEditor(null, force = true)
         motionSession += 1
         entryDestinationReadySession = null
@@ -231,8 +235,14 @@ fun CaibApp(
                 onCategoryFilter = viewModel::setCategoryFilter,
                 onEntryClick = { openEditor(it.id, EntryEditorMode.FULL) },
                 onCategoryHotspotClick = { openEditor(it.id, EntryEditorMode.CATEGORY_ONLY) },
-                onInfoHotspotClick = { quickNoteEntry = it },
-                onAmountHotspotClick = { entry, bounds -> quickAmountTarget = entry to bounds },
+                onInfoHotspotClick = {
+                    viewModel.entrySaveFeedback.beginInteraction()
+                    quickNoteEntry = it
+                },
+                onAmountHotspotClick = { entry, bounds ->
+                    viewModel.entrySaveFeedback.beginInteraction()
+                    quickAmountTarget = entry to bounds
+                },
                 onDeleteRequest = { entry -> viewModel.deleteEntry(entry.id) {} },
                 recentlyCreatedEntryId = recentlyCreatedEntryId,
                 onInsertAnimationFinished = { entryId ->
@@ -461,13 +471,26 @@ fun CaibApp(
     val entryMotionActive = entryLaunchSession != null ||
         pendingEntrySaveMotion != null ||
         pendingEntryReturnMotion != null
+    val editing = entryMotionActive || navigation.activeStack.lastOrNull() is EntryEditorKey ||
+        quickAmountTarget != null || quickNoteEntry != null
+    val importantMessageVisible = snackbar.currentSnackbarData != null
+    LaunchedEffect(saveConfirmation, importantMessageVisible) {
+        if (importantMessageVisible) saveConfirmation?.let(viewModel.entrySaveFeedback::dismiss)
+    }
 
     Box(Modifier.fillMaxSize()) {
         Scaffold(
             modifier = Modifier.then(
                 if (entryMotionActive) Modifier.semantics { hideFromAccessibility() } else Modifier
             ),
-            snackbarHost = { SnackbarHost(snackbar) },
+            snackbarHost = {
+                SnackbarHost(snackbar)
+                if (!editing && !importantMessageVisible) {
+                    saveConfirmation?.let { confirmation ->
+                        EntrySaveSnackbar(confirmation, viewModel.entrySaveFeedback::dismiss)
+                    }
+                }
+            },
             contentWindowInsets = routeContentInsets,
             bottomBar = {
                 if (navigation.isAtRoot) {
@@ -476,6 +499,7 @@ fun CaibApp(
                     SakuBottomBar(
                         selectedTab = selectedTab,
                         onTabSelected = { tab ->
+                            viewModel.entrySaveFeedback.beginInteraction()
                             destinations.firstOrNull { it.tab == tab }?.let { navigation.active = it.key }
                         },
                         onEntryClick = ::launchNewEntry,

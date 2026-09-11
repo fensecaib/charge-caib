@@ -76,6 +76,7 @@ fun ProfileScreen(
     onThemeModeChange: (CaibThemeMode) -> Unit = {},
 ) {
     var showExportDialog by remember { mutableStateOf(false) }
+    var showMigration by remember { mutableStateOf(false) }
     var showLicenses by remember { mutableStateOf(false) }
     var showAppearanceDialog by remember { mutableStateOf(false) }
     var exportScope by remember { mutableStateOf(ExportScopeChoice.CURRENT_MONTH) }
@@ -114,6 +115,7 @@ fun ProfileScreen(
                     showAppearanceDialog = true
                 }
                 SettingRow(Icons.Rounded.Category, "分类管理", "添加、排序和归档分类", onClick = onManageCategories)
+                SettingRow(Icons.Rounded.FileDownload, "数据迁移", "复制迁移码，按日期覆盖导入") { showMigration = true }
                 SettingRow(Icons.Rounded.FileUpload, "导入 CSV", "预览、去重后批量导入") {
                     importLauncher.launch(
                         arrayOf(
@@ -147,6 +149,9 @@ fun ProfileScreen(
         }
     }
 
+    if (showMigration) {
+        caib.charge.ui.settings.MigrationDialog(onDismiss = { showMigration = false })
+    }
     if (showAppearanceDialog) {
         ThemeModeDialog(
             selectedMode = themeMode,
