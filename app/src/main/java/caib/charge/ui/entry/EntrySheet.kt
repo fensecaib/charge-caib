@@ -19,6 +19,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.indication
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -41,6 +42,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Backspace
@@ -56,7 +58,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -97,9 +98,12 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
+import caib.charge.ui.components.CaibTextButton
+import caib.charge.ui.components.caibOutlinedTextFieldColors
 import caib.charge.domain.AmountError
 import caib.charge.domain.AmountExpressionEngine
 import caib.charge.domain.model.EntryDateLimits
@@ -114,9 +118,21 @@ import caib.charge.ui.model.UiEntryType
 import caib.charge.ui.model.UiLedgerEntry
 import caib.charge.ui.model.UiRecentNoteState
 import caib.charge.ui.model.UiRecentNoteSuggestion
-import caib.charge.ui.theme.CategoryPalette
+import caib.charge.ui.theme.caibIsDark
+import caib.charge.ui.theme.categoryContainerColor
+import caib.charge.ui.theme.categoryContentColor
+import caib.charge.ui.theme.controlOutlineColor
+import caib.charge.ui.theme.expenseColor
+import caib.charge.ui.theme.expenseContainerColor
+import caib.charge.ui.theme.expenseContentColor
+import caib.charge.ui.theme.incomeColor
+import caib.charge.ui.theme.incomeContainerColor
+import caib.charge.ui.theme.incomeContentColor
+import caib.charge.ui.theme.mutedColor
 import caib.charge.ui.util.formatFullDate
 import caib.charge.ui.util.formatMoney
+import caib.charge.ui.util.codePointLength
+import caib.charge.ui.util.takeCodePoints
 import java.time.LocalDate
 import java.time.YearMonth
 
@@ -127,6 +143,12 @@ enum class EntryEditorMode {
     NOTE_ONLY,
     AMOUNT_DATE_ONLY
 }
+
+private val CompactAmountAutoSize = TextAutoSize.StepBased(
+    minFontSize = 12.sp,
+    maxFontSize = 20.sp,
+    stepSize = 1.sp,
+)
 
 data class EntrySheetResult(
     val id: Long?,
@@ -390,7 +412,7 @@ fun EntryEditorScreen(
                 if (showNote) {
                     RecentNoteField(
                         note = note,
-                        onNoteChange = { note = it.take(100) },
+                        onNoteChange = { note = it.takeCodePoints(100) },
                         enabled = !isSaving,
                         noteFocusRequester = noteFocusRequester,
                         onFocusChanged = { focused ->
@@ -402,14 +424,14 @@ fun EntryEditorScreen(
                         editorTopPx = editorTopPx,
                         onDismissPopup = { recentNotesDismissed = true },
                         onSuggestionClick = { suggestion ->
-                            note = suggestion.note.take(100)
+                            note = suggestion.note.takeCodePoints(100)
                             recentNotesDismissed = true
                         },
                     )
                 }
 
                 if (existing != null && mode == EntryEditorMode.FULL && onDelete != null) {
-                    TextButton(
+                    CaibTextButton(
                         onClick = { showDeleteConfirm = true },
                         enabled = !isSaving,
                         modifier = Modifier.height(48.dp)
@@ -485,16 +507,16 @@ fun EntryEditorScreen(
             title = { Text("删除这笔账目？") },
             text = { Text("删除后可在底部提示中立即撤销。") },
             confirmButton = {
-                TextButton(
+                CaibTextButton(
                     modifier = Modifier.testTag("confirm_delete_entry"),
                     onClick = {
                         showDeleteConfirm = false
                         onDelete(existing)
                     }
-                ) { Text("删除", color = MaterialTheme.colorScheme.error) }
+                ) { Text("删除", color = expenseContentColor()) }
             },
             dismissButton = {
-                TextButton(onClick = { showDeleteConfirm = false }) { Text("取消") }
+                CaibTextButton(onClick = { showDeleteConfirm = false }) { Text("取消") }
             }
         )
     }
@@ -506,17 +528,17 @@ fun EntryEditorScreen(
             title = { Text("放弃修改？") },
             text = { Text("尚未保存的内容会丢失。") },
             confirmButton = {
-                TextButton(
+                CaibTextButton(
                     modifier = Modifier.testTag("confirm_discard_entry"),
                     enabled = !isSaving,
                     onClick = {
                         showDiscardConfirm = false
                         completeDismiss()
                     },
-                ) { Text("放弃", color = MaterialTheme.colorScheme.error) }
+                ) { Text("放弃", color = expenseContentColor()) }
             },
             dismissButton = {
-                TextButton(onClick = { showDiscardConfirm = false }) { Text("继续编辑") }
+                CaibTextButton(onClick = { showDiscardConfirm = false }) { Text("继续编辑") }
             }
         )
     }
@@ -558,7 +580,7 @@ private fun EntryTypeTopBar(
                 .height(36.dp),
             shape = RoundedCornerShape(18.dp),
             color = MaterialTheme.colorScheme.surface,
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+            border = BorderStroke(1.dp, controlOutlineColor()),
         ) {}
 
         Row(
@@ -598,19 +620,19 @@ private fun EntryTypeTopBarOption(
     modifier: Modifier = Modifier,
 ) {
     val selectedContainer = if (type == UiEntryType.EXPENSE) {
-        MaterialTheme.colorScheme.errorContainer
+        expenseContainerColor()
     } else {
-        MaterialTheme.colorScheme.primaryContainer
+        incomeContainerColor()
     }
     val selectedContent = if (type == UiEntryType.EXPENSE) {
-        MaterialTheme.colorScheme.onErrorContainer
+        expenseContentColor()
     } else {
-        MaterialTheme.colorScheme.onPrimaryContainer
+        incomeContentColor()
     }
     val selectedOutline = if (type == UiEntryType.EXPENSE) {
-        MaterialTheme.colorScheme.error
+        expenseColor()
     } else {
-        MaterialTheme.colorScheme.primary
+        incomeColor()
     }
     Box(
         modifier = modifier
@@ -687,8 +709,9 @@ private fun RecentNoteField(
                 .onGloballyPositioned { fieldBounds = it.boundsInWindow() }
                 .testTag("entry_note"),
             enabled = enabled,
+            colors = caibOutlinedTextFieldColors(),
             label = { Text("备注") },
-            supportingText = { Text("${note.length}/100") },
+            supportingText = { Text("${note.codePointLength()}/100") },
             singleLine = true,
             shape = RoundedCornerShape(10.dp),
         )
@@ -843,6 +866,8 @@ private fun EntryCategoryTile(
             .semantics { this.selected = selected },
         containerColor = if (selected) MaterialTheme.colorScheme.primaryContainer
         else MaterialTheme.colorScheme.surface,
+        borderColor = if (selected && MaterialTheme.colorScheme.caibIsDark) MaterialTheme.colorScheme.primary
+        else controlOutlineColor(),
         enabled = enabled,
         onClick = onClick
     ) {
@@ -857,14 +882,14 @@ private fun EntryCategoryTile(
                     .clip(RoundedCornerShape(10.dp))
                     .background(
                         if (iconKey == null) MaterialTheme.colorScheme.surfaceVariant
-                        else CategoryPalette[colorKey.mod(CategoryPalette.size)].copy(alpha = 0.22f)
+                        else categoryContainerColor(colorKey)
                     ),
                 contentAlignment = Alignment.Center
             ) {
                 if (iconKey == null) {
                     Icon(Icons.Rounded.Settings, contentDescription = null, modifier = Modifier.size(20.dp))
                 } else {
-                    CategoryIcon(iconKey, contentDescription = null, modifier = Modifier.size(20.dp))
+                    CategoryIcon(iconKey, contentDescription = null, modifier = Modifier.size(20.dp), tint = categoryContentColor(colorKey))
                 }
             }
             Spacer(Modifier.height(4.dp))
@@ -872,7 +897,7 @@ private fun EntryCategoryTile(
                 name,
                 style = MaterialTheme.typography.labelMedium,
                 color = if (enabled) MaterialTheme.colorScheme.onSurface
-                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
+                else mutedColor(lightAlpha = 0.55f),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -891,10 +916,10 @@ private fun EntryContextStrip(category: UiCategory, amountCents: Long?) {
                 modifier = Modifier
                     .size(40.dp)
                     .clip(RoundedCornerShape(10.dp))
-                    .background(CategoryPalette[category.colorKey.mod(CategoryPalette.size)].copy(alpha = 0.22f)),
+                    .background(categoryContainerColor(category.colorKey)),
                 contentAlignment = Alignment.Center
             ) {
-                CategoryIcon(category.iconKey, contentDescription = null, modifier = Modifier.size(22.dp))
+                CategoryIcon(category.iconKey, contentDescription = null, modifier = Modifier.size(22.dp), tint = categoryContentColor(category.colorKey))
             }
             Text(category.name, modifier = Modifier.weight(1f).padding(horizontal = 10.dp), style = MaterialTheme.typography.titleMedium)
             amountCents?.let {
@@ -925,28 +950,23 @@ private fun AmountAndDateCard(
                     categoryName ?: "未选择分类",
                     modifier = Modifier.weight(1f),
                     style = MaterialTheme.typography.labelLarge,
-                    color = if (categoryName == null) MaterialTheme.colorScheme.error
+                    color = if (categoryName == null) expenseContentColor()
                     else MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-                TextButton(onClick = onDateClick, modifier = Modifier.height(48.dp), enabled = enabled) {
+                CaibTextButton(onClick = onDateClick, modifier = Modifier.height(48.dp), enabled = enabled) {
                     Icon(Icons.Rounded.CalendarMonth, contentDescription = null, modifier = Modifier.size(20.dp))
                     Spacer(Modifier.width(4.dp))
                     Text(formatFullDate(date), style = MaterialTheme.typography.labelMedium, maxLines = 1)
                 }
             }
-            Text(
-                expression.ifBlank { "0" },
-                modifier = Modifier.fillMaxWidth(),
+            EntryAmountExpression(
+                expression = expression,
                 textAlign = TextAlign.End,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
             )
             AnimatedContent(
-                targetState = evaluationResult?.let(::formatMoney) ?: "¥0.00",
+                targetState = amountResultText(evaluationResult, evaluationError),
                 modifier = Modifier.fillMaxWidth(),
                 contentAlignment = Alignment.CenterEnd,
                 transitionSpec = { entryAmountTransition() },
@@ -958,7 +978,7 @@ private fun AmountAndDateCard(
                     textAlign = TextAlign.End,
                     style = MaterialTheme.typography.headlineLarge,
                     color = if (evaluationError != null && evaluationError != AmountError.EMPTY) {
-                        MaterialTheme.colorScheme.error
+                        expenseContentColor()
                     } else {
                         MaterialTheme.colorScheme.onSurface
                     },
@@ -966,16 +986,9 @@ private fun AmountAndDateCard(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            Text(
-                amountErrorMessage(evaluationError),
-                modifier = Modifier.fillMaxWidth(),
+            EntryAmountStatus(
+                evaluationError = evaluationError,
                 textAlign = TextAlign.End,
-                style = MaterialTheme.typography.labelSmall,
-                color = if (evaluationError == null || evaluationError == AmountError.EMPTY) {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                } else {
-                    MaterialTheme.colorScheme.error
-                }
             )
         }
     }
@@ -998,53 +1011,50 @@ private fun CompactAmountAndDateBar(
             .fillMaxWidth()
             .semantics {
                 role = Role.Button
-                contentDescription = "金额${evaluationResult?.let(::formatMoney) ?: "未填写"}，日期${formatFullDate(date)}，点击修改日期"
+                contentDescription = "金额${amountResultText(evaluationResult, evaluationError)}，日期${formatFullDate(date)}，点击修改日期"
             },
         onClick = onDateClick,
         enabled = enabled,
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp).padding(horizontal = 12.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        Column(
+            modifier = Modifier.fillMaxWidth().heightIn(min = 60.dp).padding(horizontal = 12.dp, vertical = 4.dp),
         ) {
-            Column(Modifier.weight(1f)) {
-                Text(
-                    "${categoryName ?: "未选择分类"} · ${date.monthValue}月${date.dayOfMonth}日",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = if (categoryName == null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    when {
-                        hasBlockingError -> amountErrorMessage(evaluationError)
-                        expression.isBlank() -> "请输入金额"
-                        else -> expression
-                    },
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = if (hasBlockingError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        "${categoryName ?: "未选择分类"} · ${date.monthValue}月${date.dayOfMonth}日",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (categoryName == null) expenseContentColor() else MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    EntryAmountExpression(expression = expression)
+                }
+                AnimatedContent(
+                    targetState = amountResultText(evaluationResult, evaluationError),
+                    modifier = Modifier.width(148.dp),
+                    contentAlignment = Alignment.CenterEnd,
+                    transitionSpec = { entryAmountTransition() },
+                    label = "entry_amount_compact",
+                ) { amount ->
+                    Text(
+                        amount,
+                        modifier = Modifier.fillMaxWidth(),
+                        textAlign = TextAlign.End,
+                        style = MaterialTheme.typography.titleLarge,
+                        color = if (hasBlockingError) expenseContentColor() else MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Clip,
+                        autoSize = CompactAmountAutoSize,
+                    )
+                }
             }
-            AnimatedContent(
-                targetState = evaluationResult?.let(::formatMoney) ?: "¥0.00",
-                modifier = Modifier.width(148.dp),
-                contentAlignment = Alignment.CenterEnd,
-                transitionSpec = { entryAmountTransition() },
-                label = "entry_amount_compact",
-            ) { amount ->
-                Text(
-                    amount,
-                    modifier = Modifier.fillMaxWidth(),
-                    textAlign = TextAlign.End,
-                    style = MaterialTheme.typography.titleLarge,
-                    color = if (hasBlockingError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
+            EntryAmountStatus(evaluationError = evaluationError)
         }
     }
 }
@@ -1160,13 +1170,7 @@ private fun EntryKeyButton(
     val isSave = key.label == "完成"
     Box(
         modifier = modifier
-            .height(50.dp)
-            .graphicsLayer {
-                scaleX = keyScale.value
-                scaleY = keyScale.value
-            }
-            .clip(RoundedCornerShape(10.dp))
-            .background(keyBackground(key.label, enabled))
+            .height(48.dp)
             .semantics {
                 role = Role.Button
                 contentDescription = when (key.label) {
@@ -1182,7 +1186,7 @@ private fun EntryKeyButton(
                     Modifier.combinedClickable(
                         enabled = enabled,
                         interactionSource = interactionSource,
-                        indication = indication,
+                        indication = null,
                         onLongClickLabel = "清空金额",
                         onLongClick = onClear,
                         onClick = { onClick(key) },
@@ -1191,41 +1195,60 @@ private fun EntryKeyButton(
                     Modifier.clickable(
                         enabled = enabled,
                         interactionSource = interactionSource,
-                        indication = indication,
+                        indication = null,
                         onClick = { onClick(key) },
                     )
                 }
             ),
         contentAlignment = Alignment.Center,
     ) {
-        when {
-            isSave && isSaving -> CircularProgressIndicator(
-                modifier = Modifier.size(20.dp),
-                strokeWidth = 2.dp,
-                color = MaterialTheme.colorScheme.onTertiary,
-            )
-            key.label == "⌫" -> Icon(
-                Icons.AutoMirrored.Rounded.Backspace,
-                contentDescription = null,
-                modifier = Modifier.size(22.dp),
-            )
-            else -> Text(
-                key.label,
-                style = MaterialTheme.typography.titleMedium,
-                color = if (enabled) MaterialTheme.colorScheme.onSurface
-                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
-            )
+        // The outer 48dp target is stable; press feedback scales only its painted content.
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    scaleX = keyScale.value
+                    scaleY = keyScale.value
+                }
+                .clip(RoundedCornerShape(10.dp))
+                .background(keyBackground(key.label, enabled))
+                .indication(interactionSource, indication)
+                .testTag(if (isSave) "entry_save_visual" else "entry_key_${key.semanticLabel}_visual"),
+            contentAlignment = Alignment.Center,
+        ) {
+            when {
+                isSave && isSaving -> CircularProgressIndicator(
+                    modifier = Modifier.size(20.dp),
+                    strokeWidth = 2.dp,
+                    color = MaterialTheme.colorScheme.onTertiary,
+                )
+                key.label == "⌫" -> Icon(
+                    Icons.AutoMirrored.Rounded.Backspace,
+                    contentDescription = null,
+                    modifier = Modifier.size(22.dp),
+                )
+                else -> Text(
+                    key.label,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = when {
+                        !enabled -> mutedColor(lightAlpha = 0.45f)
+                        isSave && MaterialTheme.colorScheme.caibIsDark -> MaterialTheme.colorScheme.onTertiary
+                        else -> MaterialTheme.colorScheme.onSurface
+                    },
+                )
+            }
         }
     }
 }
 
 @Composable
 private fun keyBackground(label: String, enabled: Boolean): Color {
-    if (!enabled) return MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+    if (!enabled) return MaterialTheme.colorScheme.surfaceVariant.copy(alpha = if (MaterialTheme.colorScheme.caibIsDark) 1f else 0.55f)
     return when (label) {
         "完成" -> MaterialTheme.colorScheme.tertiary
         "+", "-" -> MaterialTheme.colorScheme.primaryContainer
-        "日期" -> MaterialTheme.colorScheme.tertiary.copy(alpha = 0.30f)
+        "日期" -> if (MaterialTheme.colorScheme.caibIsDark) MaterialTheme.colorScheme.tertiaryContainer
+        else MaterialTheme.colorScheme.tertiary.copy(alpha = 0.30f)
         else -> MaterialTheme.colorScheme.surfaceVariant
     }
 }
@@ -1294,12 +1317,12 @@ internal fun SakuDatePickerDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = {
+            CaibTextButton(onClick = {
                 onConfirm(clampedDate(selectedYear, selectedMonth, selectedDay, today))
             }) { Text("确定") }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
+            CaibTextButton(onClick = onDismiss) { Text("取消") }
         }
     )
 }

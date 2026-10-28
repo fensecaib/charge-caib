@@ -2,10 +2,12 @@ package caib.charge.di
 
 import caib.charge.data.repository.DefaultCategoryRepository
 import caib.charge.data.repository.DefaultLedgerRepository
+import caib.charge.data.repository.DefaultSubscriptionRepository
 import caib.charge.data.transfer.DefaultCsvTransferService
 import caib.charge.domain.repository.CategoryRepository
 import caib.charge.domain.repository.CsvTransferService
 import caib.charge.domain.repository.LedgerRepository
+import caib.charge.domain.repository.SubscriptionRepository
 import caib.charge.domain.repository.MigrationTransferService
 import caib.charge.data.repository.MigrationRepository
 import dagger.Binds
@@ -17,6 +19,10 @@ import javax.inject.Singleton
 @Module
 @InstallIn(SingletonComponent::class)
 abstract class RepositoryModule {
+    @Binds
+    @Singleton
+    abstract fun bindSubscriptionRepository(implementation: DefaultSubscriptionRepository): SubscriptionRepository
+
     @Binds
     @Singleton
     abstract fun bindMigrationService(implementation: MigrationRepository): MigrationTransferService

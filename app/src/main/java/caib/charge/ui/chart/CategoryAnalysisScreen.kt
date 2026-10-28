@@ -53,7 +53,12 @@ import caib.charge.ui.model.UiEntryRankingOrder
 import caib.charge.ui.model.UiEntryType
 import caib.charge.ui.model.UiLedgerEntry
 import caib.charge.ui.model.UiNoteBreakdownSlice
-import caib.charge.ui.theme.CategoryPalette
+import caib.charge.ui.theme.caibIsDark
+import caib.charge.ui.theme.caibPaletteColor
+import caib.charge.ui.theme.categoryContainerColor
+import caib.charge.ui.theme.categoryContentColor
+import caib.charge.ui.theme.controlOutlineColor
+import caib.charge.ui.theme.paletteColor
 import caib.charge.ui.util.formatMoney
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -201,7 +206,7 @@ fun CategoryAnalysisScreen(
                                 border = BorderStroke(
                                     if (allSelected) 2.dp else 1.dp,
                                     if (allSelected) MaterialTheme.colorScheme.primary
-                                    else MaterialTheme.colorScheme.outlineVariant,
+                                    else controlOutlineColor(),
                                 ),
                                 shape = RoundedCornerShape(8.dp),
                             ) {
@@ -270,10 +275,10 @@ private fun CategoryTopBar(
         actions = {
             if (category != null) {
                 Box(
-                    Modifier.size(40.dp).background(CategoryPalette[category.colorKey.mod(CategoryPalette.size)].copy(alpha = 0.22f), CircleShape),
+                    Modifier.size(40.dp).background(categoryContainerColor(category.colorKey), CircleShape),
                     contentAlignment = Alignment.Center,
                 ) {
-                    CategoryIcon(category.iconKey, contentDescription = category.name, modifier = Modifier.size(22.dp))
+                    CategoryIcon(category.iconKey, contentDescription = category.name, modifier = Modifier.size(22.dp), tint = categoryContentColor(category.colorKey))
                 }
                 Spacer(Modifier.size(8.dp))
             }
@@ -299,6 +304,8 @@ private fun NoteDonutChart(
     val summary = remember(slices) {
         slices.joinToString("，") { "${it.label}${(it.percentage * 100).roundToInt()}%" }
     }
+    val colors = MaterialTheme.colorScheme
+    val sliceColors = remember(slices, colors) { slices.map { colors.caibPaletteColor(it.color) } }
     Box(Modifier.size(210.dp), contentAlignment = Alignment.Center) {
         Canvas(
             modifier = Modifier.fillMaxSize().semantics { contentDescription = "备注构成环形图：$summary" }.pointerInput(slices, total, selectedId) {
@@ -339,11 +346,15 @@ private fun NoteDonutChart(
                 val stroke = Stroke(width = strokeWidth, cap = StrokeCap.Butt)
                 onDrawBehind {
                     var start = -90f
-                    slices.forEach { slice ->
+                    slices.forEachIndexed { index, slice ->
                         val sweep = if (total <= 0L) 0f else slice.amountCents.toFloat() / total * 360f
-                        val emphasis = if (selectedId == null || slice.id == selectedId) 1f else 0.42f
+                        val emphasis = when {
+                            selectedId == null || slice.id == selectedId -> 1f
+                            colors.caibIsDark -> 0.72f
+                            else -> 0.42f
+                        }
                         drawArc(
-                            color = slice.color.copy(alpha = slice.color.alpha * emphasis),
+                            color = sliceColors[index].copy(alpha = sliceColors[index].alpha * emphasis),
                             startAngle = start,
                             sweepAngle = sweep,
                             useCenter = false,
@@ -382,7 +393,7 @@ private fun BreakdownLegendRow(slice: UiNoteBreakdownSlice, selected: Boolean, o
         border = BorderStroke(
             if (selected) 2.dp else 1.dp,
             if (selected) MaterialTheme.colorScheme.primary
-            else MaterialTheme.colorScheme.outlineVariant,
+            else controlOutlineColor(),
         ),
         shape = RoundedCornerShape(8.dp),
     ) {
@@ -390,7 +401,7 @@ private fun BreakdownLegendRow(slice: UiNoteBreakdownSlice, selected: Boolean, o
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(Modifier.size(12.dp).background(slice.color, CircleShape))
+            Box(Modifier.size(12.dp).background(paletteColor(slice.color), CircleShape))
             Column(Modifier.weight(1f).padding(horizontal = 10.dp)) {
                 Text(slice.label, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text("${slice.count} 笔", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -417,10 +428,10 @@ private fun AnalysisEntryRow(entry: UiLedgerEntry, onClick: (UiLedgerEntry) -> U
     CaibCard(modifier = Modifier.fillMaxWidth(), onClick = { onClick(entry) }) {
         Row(Modifier.fillMaxWidth().heightIn(min = 68.dp).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(
-                Modifier.size(40.dp).background(CategoryPalette[entry.categoryColorKey.mod(CategoryPalette.size)].copy(alpha = 0.22f), CircleShape),
+                Modifier.size(40.dp).background(categoryContainerColor(entry.categoryColorKey), CircleShape),
                 contentAlignment = Alignment.Center,
             ) {
-                CategoryIcon(entry.categoryIconKey, contentDescription = null, modifier = Modifier.size(22.dp))
+                CategoryIcon(entry.categoryIconKey, contentDescription = null, modifier = Modifier.size(22.dp), tint = categoryContentColor(entry.categoryColorKey))
             }
             Column(Modifier.weight(1f).padding(horizontal = 10.dp)) {
                 Text(entry.note.ifBlank { entry.categoryName }, maxLines = 1, overflow = TextOverflow.Ellipsis)

@@ -35,6 +35,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import caib.charge.ui.theme.controlOutlineColor
 import caib.charge.domain.model.ChartGranularity
 import caib.charge.domain.model.ChartPeriod
 import caib.charge.domain.model.ChartPeriodAxis
@@ -147,7 +148,7 @@ private fun PeriodRailItem(
         label = "period-rail-container",
     )
     val outlineColor by animateColorAsState(
-        targetValue = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
+        targetValue = if (selected) MaterialTheme.colorScheme.primary else controlOutlineColor(),
         animationSpec = tween(durationMillis = 150),
         label = "period-rail-outline",
     )

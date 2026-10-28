@@ -21,6 +21,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.ui.graphics.Color
 
 val CategoryIconOptions: List<Pair<String, ImageVector>> = listOf(
     "restaurant" to Icons.Rounded.Restaurant,
@@ -44,6 +46,11 @@ val CategoryIconOptions: List<Pair<String, ImageVector>> = listOf(
 fun categoryIcon(key: String): ImageVector = CategoryIconOptions.firstOrNull { it.first == key }?.second ?: Icons.Rounded.MoreHoriz
 
 @Composable
-fun CategoryIcon(key: String, contentDescription: String?, modifier: Modifier = Modifier) {
-    Icon(categoryIcon(key), contentDescription = contentDescription, modifier = modifier)
+fun CategoryIcon(
+    key: String,
+    contentDescription: String?,
+    modifier: Modifier = Modifier,
+    tint: Color = LocalContentColor.current,
+) {
+    Icon(categoryIcon(key), contentDescription = contentDescription, modifier = modifier, tint = tint)
 }

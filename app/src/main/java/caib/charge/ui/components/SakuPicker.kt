@@ -18,7 +18,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -162,12 +161,12 @@ fun SakuMonthPickerDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = { onConfirm(YearMonth.of(selectedYear, selectedMonth)) }) {
+            CaibTextButton(onClick = { onConfirm(YearMonth.of(selectedYear, selectedMonth)) }) {
                 Text("确定")
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
+            CaibTextButton(onClick = onDismiss) { Text("取消") }
         },
     )
 }

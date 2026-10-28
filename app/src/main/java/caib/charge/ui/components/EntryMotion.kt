@@ -44,7 +44,8 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
-import caib.charge.ui.theme.CaibSuccess
+import caib.charge.ui.theme.successColor
+import caib.charge.ui.theme.successContentColor
 import kotlin.math.hypot
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
@@ -360,8 +361,8 @@ internal fun EntrySaveSuccessOverlay(
                     this.alpha = alpha.value
                 },
             shape = RoundedCornerShape(22.dp),
-            color = CaibSuccess,
-            contentColor = androidx.compose.ui.graphics.Color.White,
+            color = successColor(),
+            contentColor = successContentColor(),
             shadowElevation = 6.dp,
         ) {
             Box(contentAlignment = Alignment.Center) {

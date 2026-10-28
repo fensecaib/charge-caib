@@ -1,10 +1,10 @@
 package caib.charge.ui
 
-import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import caib.charge.ui.components.CaibSnackbarHost
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
@@ -45,5 +45,5 @@ internal fun EntrySaveSnackbar(
         host.showSnackbar(confirmation.text)
         onDismiss(confirmation)
     }
-    SnackbarHost(host)
+    CaibSnackbarHost(host)
 }

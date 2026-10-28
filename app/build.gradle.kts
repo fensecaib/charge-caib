@@ -14,8 +14,8 @@ android {
         applicationId = "caib.charge"
         minSdk = 31
         targetSdk = 36
-        versionCode = 5
-        versionName = "1.1.3"
+        versionCode = 9
+        versionName = "1.1.7"
         testInstrumentationRunner = "caib.charge.CaibTestRunner"
 
         vectorDrawables.useSupportLibrary = true
@@ -55,6 +55,12 @@ ksp {
     arg("room.schemaLocation", "$projectDir/schemas")
 }
 
+// Both variants export the same Room schema. Serialize their processors so a new
+// schema version cannot be read while the other worker is still writing it.
+tasks.matching { it.name == "kspReleaseKotlin" }.configureEach {
+    mustRunAfter("kspDebugKotlin")
+}
+
 dependencies {
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.core.ktx)
@@ -89,6 +95,7 @@ dependencies {
     androidTestImplementation(libs.androidx.test.uiautomator)
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     androidTestImplementation("com.google.dagger:hilt-android-testing:2.60.1")
+    kspAndroidTest(libs.androidx.room.compiler)
     kspAndroidTest(libs.hilt.compiler)
     debugImplementation(libs.androidx.compose.ui.tooling)
     debugImplementation(libs.androidx.compose.ui.test.manifest)

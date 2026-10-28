@@ -36,7 +36,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -64,6 +63,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import caib.charge.ui.components.CaibTextButton
 import caib.charge.domain.model.EntryDateLimits
 import caib.charge.ui.components.CategoryIcon
 import caib.charge.ui.components.SakuCard
@@ -75,7 +75,12 @@ import caib.charge.ui.model.UiDetailFilter
 import caib.charge.ui.model.UiEntryType
 import caib.charge.ui.model.UiLedgerEntry
 import caib.charge.ui.model.UiPeriodSummary
-import caib.charge.ui.theme.CategoryPalette
+import caib.charge.ui.theme.categoryContainerColor
+import caib.charge.ui.theme.categoryContentColor
+import caib.charge.ui.theme.expenseColor
+import caib.charge.ui.theme.expenseContentColor
+import caib.charge.ui.theme.incomeColor
+import caib.charge.ui.theme.incomeContentColor
 import caib.charge.ui.util.formatDay
 import caib.charge.ui.util.formatMoney
 import caib.charge.ui.util.formatMonth
@@ -194,20 +199,20 @@ fun DetailScreen(
             text = { Text("修改会打开完整账目页；删除后仍可通过底部提示撤销。") },
             confirmButton = {
                 Row {
-                    TextButton(onClick = {
+                    CaibTextButton(onClick = {
                         longPressedEntry = null
                         onEntryClick(entry)
                     }) { Text("修改") }
                     if (onDeleteRequest != null) {
-                        TextButton(onClick = {
+                        CaibTextButton(onClick = {
                             longPressedEntry = null
                             deleteCandidate = entry
-                        }) { Text("删除", color = MaterialTheme.colorScheme.error) }
+                        }) { Text("删除", color = expenseContentColor()) }
                     }
                 }
             },
             dismissButton = {
-                TextButton(onClick = { longPressedEntry = null }) { Text("取消") }
+                CaibTextButton(onClick = { longPressedEntry = null }) { Text("取消") }
             }
         )
     }
@@ -219,16 +224,16 @@ fun DetailScreen(
             title = { Text("删除这笔账目？") },
             text = { Text("删除后可在底部提示中立即撤销。") },
             confirmButton = {
-                TextButton(
+                CaibTextButton(
                     modifier = Modifier.testTag("confirm_delete_entry"),
                     onClick = {
                         deleteCandidate = null
                         onDeleteRequest?.invoke(entry)
                     },
-                ) { Text("确认删除", color = MaterialTheme.colorScheme.error) }
+                ) { Text("确认删除", color = expenseContentColor()) }
             },
             dismissButton = {
-                TextButton(onClick = { deleteCandidate = null }) { Text("取消") }
+                CaibTextButton(onClick = { deleteCandidate = null }) { Text("取消") }
             },
         )
     }
@@ -251,7 +256,7 @@ private fun DetailTopBar(
                 Icon(Icons.Rounded.ChevronLeft, contentDescription = "上一个月")
             }
             if (onPeriodPickerRequest != null) {
-                TextButton(
+                CaibTextButton(
                     onClick = onPeriodPickerRequest,
                     modifier = Modifier
                         .height(48.dp)
@@ -304,7 +309,7 @@ private fun CompactSummaryCard(summary: UiPeriodSummary) {
                     formatMoney(summary.balanceCents),
                     style = MaterialTheme.typography.titleLarge,
                     color = if (summary.balanceCents >= 0) MaterialTheme.colorScheme.onSurface
-                    else MaterialTheme.colorScheme.error,
+                    else expenseContentColor(),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -312,13 +317,13 @@ private fun CompactSummaryCard(summary: UiPeriodSummary) {
             SummaryMetric(
                 label = "收入",
                 cents = summary.incomeCents,
-                color = MaterialTheme.colorScheme.primary,
+                color = incomeContentColor(),
                 modifier = Modifier.weight(0.8f)
             )
             SummaryMetric(
                 label = "支出",
                 cents = summary.expenseCents,
-                color = MaterialTheme.colorScheme.error,
+                color = expenseContentColor(),
                 modifier = Modifier.weight(0.8f)
             )
         }
@@ -600,9 +605,8 @@ private fun LedgerHotspotRow(
     onAmountClick: (Rect) -> Unit,
     onLongClick: () -> Unit
 ) {
-    val categoryTint = CategoryPalette[entry.categoryColorKey.mod(CategoryPalette.size)]
-    val amountTint = if (entry.type == UiEntryType.INCOME) MaterialTheme.colorScheme.primary
-    else MaterialTheme.colorScheme.error
+    val amountTint = if (entry.type == UiEntryType.INCOME) incomeColor() else expenseColor()
+    val amountContentTint = if (entry.type == UiEntryType.INCOME) incomeContentColor() else expenseContentColor()
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -629,7 +633,7 @@ private fun LedgerHotspotRow(
                     .widthIn(max = 72.dp)
                     .height(DetailCategoryBadgeHeight)
                     .clip(badgeShape)
-                    .background(categoryTint.copy(alpha = 0.10f))
+                    .background(categoryContainerColor(entry.categoryColorKey, lightAlpha = 0.10f))
                     .testTag("detail_category_badge_${entry.id}"),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -645,6 +649,7 @@ private fun LedgerHotspotRow(
                         modifier = Modifier
                             .size(16.dp)
                             .testTag("detail_category_icon_${entry.id}"),
+                        tint = categoryContentColor(entry.categoryColorKey),
                     )
                 }
                 Text(
@@ -705,7 +710,7 @@ private fun LedgerHotspotRow(
                 modifier = Modifier.fillMaxWidth(),
                 textAlign = TextAlign.End,
                 style = MaterialTheme.typography.labelLarge,
-                color = amountTint,
+                color = amountContentTint,
                 maxLines = 1,
                 softWrap = false,
                 overflow = TextOverflow.Clip,

@@ -54,11 +54,44 @@ import caib.charge.ui.model.UiChartPeriod
 import caib.charge.ui.model.UiChartPoint
 import caib.charge.ui.model.UiEntryType
 import caib.charge.ui.model.UiLedgerEntry
-import caib.charge.ui.theme.CaibCyanDeep
 import caib.charge.ui.theme.CaibPink
+import caib.charge.ui.theme.caibIsDark
+import caib.charge.ui.theme.controlOutlineColor
+import caib.charge.ui.theme.expenseColor
+import caib.charge.ui.theme.incomeColor
+import caib.charge.ui.theme.mutedColor
+import caib.charge.ui.theme.paletteColor
+import caib.charge.ui.theme.paletteContainerColor
 import caib.charge.ui.util.formatMoney
 import java.time.LocalDate
 import kotlin.math.roundToInt
+
+/** Centers and marker radii share one bounded plot so zero-value points stay above the labels. */
+internal data class TrendChartYGeometry(
+    val top: Float,
+    val bottom: Float,
+    val maximumMarkerRadius: Float,
+) {
+    fun yFor(amountCents: Long, maximumAmountCents: Long): Float {
+        val fraction = (amountCents.toFloat() / maximumAmountCents.coerceAtLeast(1L)).coerceIn(0f, 1f)
+        return bottom - (bottom - top) * fraction
+    }
+
+    fun gridY(index: Int, count: Int): Float =
+        top + (bottom - top) * index.coerceIn(0, (count - 1).coerceAtLeast(0)) / (count - 1).coerceAtLeast(1)
+
+    fun strokeWidth(requestedWidth: Float): Float =
+        requestedWidth.coerceIn(0f, maximumMarkerRadius * 2f)
+
+    fun markerRadius(requestedRadius: Float, strokeWidth: Float = 0f): Float =
+        requestedRadius.coerceIn(0f, (maximumMarkerRadius - strokeWidth / 2f).coerceAtLeast(0f))
+}
+
+internal fun trendChartYGeometry(height: Float, maximumMarkerRadius: Float): TrendChartYGeometry {
+    val boundedHeight = height.coerceAtLeast(0f)
+    val radius = maximumMarkerRadius.coerceIn(0f, boundedHeight / 2f)
+    return TrendChartYGeometry(top = radius, bottom = boundedHeight - radius, maximumMarkerRadius = radius)
+}
 
 @Composable
 fun ChartScreen(
@@ -221,10 +254,12 @@ internal fun TrendChart(
     onPointClick: ((UiChartPoint) -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
-    val lineColor = if (type == UiEntryType.EXPENSE) CaibPink else CaibCyanDeep
+    val lineColor = if (type == UiEntryType.EXPENSE) {
+        if (MaterialTheme.colorScheme.caibIsDark) expenseColor() else CaibPink
+    } else incomeColor()
     val selectedColor = MaterialTheme.colorScheme.tertiary
-    val gridColor = MaterialTheme.colorScheme.outlineVariant
-    val futureColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
+    val gridColor = controlOutlineColor()
+    val futureColor = mutedColor(lightAlpha = 0.35f)
     val surfaceColor = MaterialTheme.colorScheme.surface
     val max = remember(points) {
         points.asSequence()
@@ -250,51 +285,55 @@ internal fun TrendChart(
             }
         }
         Canvas(
-            modifier = Modifier.fillMaxWidth().height(190.dp).semantics {
+            modifier = Modifier.fillMaxWidth().height(190.dp).testTag("chart_trend_canvas").semantics {
                 contentDescription = "趋势图：$summary"
             }.then(pointInteraction).drawWithCache {
-                val gridStroke = 1.dp.toPx()
-                val lineStroke = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round)
+                val yGeometry = trendChartYGeometry(size.height, maximumMarkerRadius = 7.dp.toPx())
+                val gridStroke = yGeometry.strokeWidth(1.dp.toPx())
+                val lineStroke = Stroke(width = yGeometry.strokeWidth(2.dp.toPx()), cap = StrokeCap.Round)
                 val futureStroke = Stroke(width = gridStroke)
-                val chartHeight = size.height - 20.dp.toPx()
+                val normalRadius = yGeometry.markerRadius(4.dp.toPx())
+                val selectedRadius = yGeometry.maximumMarkerRadius
+                val selectedInnerRadius = selectedRadius * 3f / 7f
+                val futureRadius = yGeometry.markerRadius(4.dp.toPx(), strokeWidth = gridStroke)
                 val step = if (points.size <= 1) 0f else size.width / (points.size - 1f)
                 val path = Path()
                 var activePointCount = 0
                 points.forEachIndexed { index, point ->
                     if (!point.isFuture) {
                         val x = if (points.size <= 1) size.width / 2f else index * step
-                        val y = size.height - (point.amountCents.toFloat() / max) * chartHeight
+                        val y = yGeometry.yFor(point.amountCents, max)
                         if (activePointCount++ == 0) path.moveTo(x, y) else path.lineTo(x, y)
                     }
                 }
                 onDrawBehind {
                     repeat(4) { index ->
-                        val y = size.height * index / 3f
+                        val y = yGeometry.gridY(index, count = 4)
                         drawLine(gridColor, Offset(0f, y), Offset(size.width, y), strokeWidth = gridStroke)
                     }
                     if (activePointCount > 0) drawPath(path, lineColor, style = lineStroke)
                     points.forEachIndexed { index, point ->
                         val x = if (points.size <= 1) size.width / 2f else index * step
-                        val y = size.height - (point.amountCents.toFloat() / max) * chartHeight
+                        val y = yGeometry.yFor(point.amountCents, max)
                         when {
                             point.isFuture -> drawCircle(
                                 futureColor,
-                                4.dp.toPx(),
-                                Offset(x, size.height - gridStroke),
+                                futureRadius,
+                                Offset(x, yGeometry.bottom),
                                 style = futureStroke,
                             )
                             selectedPoint?.index == point.index -> {
-                                drawCircle(selectedColor, 7.dp.toPx(), Offset(x, y))
-                                drawCircle(surfaceColor, 3.dp.toPx(), Offset(x, y))
+                                drawCircle(selectedColor, selectedRadius, Offset(x, y))
+                                drawCircle(surfaceColor, selectedInnerRadius, Offset(x, y))
                             }
-                            else -> drawCircle(lineColor, 4.dp.toPx(), Offset(x, y))
+                            else -> drawCircle(lineColor, normalRadius, Offset(x, y))
                         }
                     }
                 }
             },
         ) { }
         if (points.isNotEmpty()) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Row(Modifier.fillMaxWidth().testTag("chart_trend_axis_labels"), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text(points.first().label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 if (points.size > 2) Text(points[points.size / 2].label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(points.last().label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -357,6 +396,7 @@ private fun PointCallout(point: UiChartPoint, entries: List<UiLedgerEntry>) {
 @Composable
 private fun CategoryRankingRow(item: UiCategorySlice, total: Long, onClick: () -> Unit) {
     val percent = if (total <= 0L) 0f else item.amountCents.toFloat() / total
+    val displayedColor = paletteColor(item.color)
     CaibCard(modifier = Modifier.fillMaxWidth(), onClick = onClick) {
         Column(
             modifier = Modifier.fillMaxWidth().heightIn(min = 72.dp).padding(horizontal = 14.dp, vertical = 12.dp).semantics {
@@ -365,8 +405,8 @@ private fun CategoryRankingRow(item: UiCategorySlice, total: Long, onClick: () -
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(40.dp).background(item.color.copy(alpha = 0.22f), CircleShape), contentAlignment = Alignment.Center) {
-                    Box(Modifier.size(12.dp).background(item.color, CircleShape))
+                Box(Modifier.size(40.dp).background(paletteContainerColor(item.color), CircleShape), contentAlignment = Alignment.Center) {
+                    Box(Modifier.size(12.dp).background(displayedColor, CircleShape))
                 }
                 Text(item.name, modifier = Modifier.weight(1f).padding(horizontal = 12.dp), fontWeight = FontWeight.Medium)
                 Column(horizontalAlignment = Alignment.End) {
@@ -375,7 +415,7 @@ private fun CategoryRankingRow(item: UiCategorySlice, total: Long, onClick: () -
                 }
             }
             Box(Modifier.fillMaxWidth().height(8.dp).background(MaterialTheme.colorScheme.surfaceVariant, CircleShape)) {
-                Box(Modifier.fillMaxWidth(percent.coerceIn(0f, 1f)).height(8.dp).background(item.color, CircleShape))
+                Box(Modifier.fillMaxWidth(percent.coerceIn(0f, 1f)).height(8.dp).background(displayedColor, CircleShape))
             }
         }
     }

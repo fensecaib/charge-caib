@@ -37,7 +37,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -50,10 +49,12 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
+import caib.charge.ui.components.CaibTextButton
 import caib.charge.ui.components.CaibCard
 import caib.charge.ui.components.SakuTopBar
 import caib.charge.BuildConfig
 import caib.charge.domain.model.CaibThemeMode
+import caib.charge.ui.theme.mutedColor
 import java.time.YearMonth
 
 enum class ExportScopeChoice { CURRENT_MONTH, CURRENT_YEAR, ALL }
@@ -184,7 +185,7 @@ fun ProfileScreen(
                 }
             },
             confirmButton = {
-                TextButton(onClick = {
+                CaibTextButton(onClick = {
                     showExportDialog = false
                     val suffix = when (exportScope) {
                         ExportScopeChoice.CURRENT_MONTH -> currentMonth.toString()
@@ -194,7 +195,7 @@ fun ProfileScreen(
                     exportLauncher.launch("彩笔记账_$suffix.csv")
                 }) { Text("创建文件") }
             },
-            dismissButton = { TextButton(onClick = { showExportDialog = false }) { Text("取消") } }
+            dismissButton = { CaibTextButton(onClick = { showExportDialog = false }) { Text("取消") } }
         )
     }
 
@@ -218,7 +219,7 @@ fun ProfileScreen(
                 }
             },
             confirmButton = {
-                TextButton(onClick = { showLicenses = false }) { Text("知道了") }
+                CaibTextButton(onClick = { showLicenses = false }) { Text("知道了") }
             }
         )
     }
@@ -257,7 +258,7 @@ private fun ThemeModeDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) { Text("完成") }
+            CaibTextButton(onClick = onDismiss) { Text("完成") }
         },
     )
 }
@@ -297,7 +298,7 @@ private fun SettingRow(
     enabled: Boolean = true,
     onClick: () -> Unit = {}
 ) {
-    val tint = if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+    val tint = if (enabled) MaterialTheme.colorScheme.primary else mutedColor(lightAlpha = 0.5f)
     Row(
         modifier = Modifier
             .fillMaxWidth()

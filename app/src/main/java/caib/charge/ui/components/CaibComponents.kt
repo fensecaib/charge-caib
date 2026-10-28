@@ -25,6 +25,10 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Snackbar
+import androidx.compose.material3.SnackbarDefaults
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -39,8 +43,31 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import caib.charge.ui.theme.controlOutlineColor
+import caib.charge.ui.theme.caibIsDark
+import caib.charge.ui.theme.mutedColor
 
 private val SakuCorner = RoundedCornerShape(10.dp)
+
+/** Success, errors and undo share the same quiet surface without changing message lifecycles. */
+@Composable
+fun CaibSnackbarHost(hostState: SnackbarHostState, modifier: Modifier = Modifier) {
+    val colors = MaterialTheme.colorScheme
+    SnackbarHost(hostState = hostState, modifier = modifier) { data ->
+        if (colors.caibIsDark) {
+            Snackbar(
+                snackbarData = data,
+                modifier = Modifier.border(1.dp, colors.outline, SnackbarDefaults.shape),
+                containerColor = colors.surfaceVariant,
+                contentColor = colors.onSurface,
+                actionColor = colors.primary,
+                dismissActionContentColor = colors.onSurfaceVariant,
+            )
+        } else {
+            Snackbar(snackbarData = data)
+        }
+    }
+}
 
 /** Saku surface: semantic surface, a quiet outline, and only a one-dp lift. */
 @Composable
@@ -49,10 +76,11 @@ fun SakuCard(
     onClick: (() -> Unit)? = null,
     enabled: Boolean = true,
     containerColor: Color = MaterialTheme.colorScheme.surface,
+    borderColor: Color = if (onClick != null) controlOutlineColor() else MaterialTheme.colorScheme.outlineVariant,
     content: @Composable () -> Unit
 ) {
     val colors = CardDefaults.cardColors(containerColor = containerColor)
-    val border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+    val border = BorderStroke(1.dp, borderColor)
     val elevation = CardDefaults.cardElevation(
         defaultElevation = 1.dp,
         pressedElevation = 2.dp,
@@ -154,7 +182,7 @@ fun <T> SakuSegmentedControl(
             .height(48.dp)
             .clip(SakuCorner)
             .background(MaterialTheme.colorScheme.surface)
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, SakuCorner),
+            .border(1.dp, controlOutlineColor(), SakuCorner),
         horizontalArrangement = Arrangement.spacedBy(3.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -175,6 +203,11 @@ fun <T> SakuSegmentedControl(
                     .background(
                         if (isSelected) MaterialTheme.colorScheme.primaryContainer
                         else Color.Transparent
+                    )
+                    .then(
+                        if (isSelected && MaterialTheme.colorScheme.caibIsDark) {
+                            Modifier.border(1.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(8.dp))
+                        } else Modifier,
                     ),
                 contentAlignment = Alignment.Center
             ) {
@@ -208,7 +241,7 @@ fun SakuCtaButton(
             containerColor = MaterialTheme.colorScheme.tertiary,
             contentColor = MaterialTheme.colorScheme.onTertiary,
             disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-            disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
+            disabledContentColor = mutedColor(lightAlpha = 0.55f)
         ),
         content = content
     )

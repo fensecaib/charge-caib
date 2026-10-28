@@ -17,12 +17,12 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -38,20 +38,32 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import caib.charge.ui.components.CaibTextButton
+import caib.charge.ui.components.caibOutlinedTextFieldColors
+import caib.charge.ui.theme.overlayScrimColor
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import caib.charge.domain.AmountError
+import androidx.compose.ui.unit.sp
 import caib.charge.domain.AmountExpressionEngine
 import caib.charge.ui.components.SakuCard
 import caib.charge.ui.components.SakuCtaButton
 import caib.charge.ui.model.UiLedgerEntry
 import caib.charge.ui.util.formatFullDate
 import caib.charge.ui.util.formatMoney
+import caib.charge.ui.util.codePointLength
+import caib.charge.ui.util.takeCodePoints
 import java.time.LocalDate
 import kotlin.math.roundToInt
+
+private val QuickAmountAutoSize = TextAutoSize.StepBased(
+    minFontSize = 12.sp,
+    maxFontSize = 24.sp,
+    stepSize = 1.sp,
+)
 
 @Composable
 fun QuickAmountEditorOverlay(
@@ -96,7 +108,7 @@ fun QuickAmountEditorOverlay(
 
     BackHandler(onBack = requestDismiss)
     Box(Modifier.fillMaxSize()) {
-        Box(Modifier.fillMaxSize().background(Color(0x522C4A5A)).clickable(onClick = requestDismiss))
+        Box(Modifier.fillMaxSize().background(overlayScrimColor()).clickable(onClick = requestDismiss))
 
         val width = with(density) { sourceBoundsInWindow.width.toDp() }
         val height = with(density) { sourceBoundsInWindow.height.toDp() }
@@ -124,25 +136,35 @@ fun QuickAmountEditorOverlay(
         ) {
             Column(Modifier.fillMaxWidth().padding(top = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text(entry.note.ifBlank { entry.categoryName }, style = MaterialTheme.typography.titleMedium)
+                    Column(Modifier.weight(1f).padding(end = 8.dp)) {
+                        Text(
+                            entry.note.ifBlank { entry.categoryName },
+                            style = MaterialTheme.typography.titleMedium,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis,
+                        )
                         Text(formatFullDate(date), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    Column(horizontalAlignment = Alignment.End) {
-                        Text(expression.ifBlank { "0" }, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(evaluation.resultCents?.let(::formatMoney) ?: "¥0.00", style = MaterialTheme.typography.headlineMedium)
+                    Column(Modifier.weight(1f), horizontalAlignment = Alignment.End) {
+                        EntryAmountExpression(expression = expression, textAlign = TextAlign.End)
+                        Text(
+                            amountResultText(evaluation.resultCents, evaluation.error),
+                            modifier = Modifier.fillMaxWidth().testTag("quick_amount_result"),
+                            textAlign = TextAlign.End,
+                            style = MaterialTheme.typography.headlineMedium,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Clip,
+                            autoSize = QuickAmountAutoSize,
+                        )
                     }
                 }
-                val error = evaluation.error
-                if (error != null && error != AmountError.EMPTY) {
-                    Text(
-                        amountErrorMessage(error),
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                        textAlign = TextAlign.End,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                }
+                EntryAmountStatus(
+                    evaluationError = evaluation.error,
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                    textAlign = TextAlign.End,
+                )
                 EntryKeypad(
                     expression = expression,
                     enabled = !isSaving,
@@ -175,12 +197,12 @@ fun QuickAmountEditorOverlay(
             title = { Text("放弃金额修改？") },
             text = { Text("尚未保存的金额或日期将不会保留。") },
             confirmButton = {
-                TextButton(
+                CaibTextButton(
                     onClick = { currentOnDismiss.value() },
                     enabled = !isSaving,
                 ) { Text("放弃") }
             },
-            dismissButton = { TextButton(onClick = { showDiscardConfirm = false }) { Text("继续修改") } },
+            dismissButton = { CaibTextButton(onClick = { showDiscardConfirm = false }) { Text("继续修改") } },
         )
     }
 }
@@ -194,7 +216,6 @@ fun QuickNoteEditorDialog(
 ) {
     var note by rememberSaveable(entry.id) { mutableStateOf(entry.note) }
     val focusRequester = remember { FocusRequester() }
-    LaunchedEffect(entry.id) { focusRequester.requestFocus() }
 
     AlertDialog(
         modifier = Modifier.imePadding(),
@@ -206,14 +227,18 @@ fun QuickNoteEditorDialog(
                 Text("${entry.categoryName} · ${formatMoney(entry.amountCents)}", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 OutlinedTextField(
                     value = note,
-                    onValueChange = { note = it.take(100) },
+                    onValueChange = { note = it.takeCodePoints(100) },
                     modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
                     label = { Text("备注（可选）") },
-                    supportingText = { Text("${note.length}/100") },
+                    supportingText = { Text("${note.codePointLength()}/100") },
                     singleLine = true,
                     enabled = !isSaving,
+                    colors = caibOutlinedTextFieldColors(),
                     shape = RoundedCornerShape(10.dp),
                 )
+                // The field is composed in Dialog's separate owner. Request focus
+                // only from that composition, after its focus target is attached.
+                LaunchedEffect(entry.id) { focusRequester.requestFocus() }
             }
         },
         confirmButton = {
@@ -224,6 +249,6 @@ fun QuickNoteEditorDialog(
                 enabled = !isSaving,
             ) { Text("保存备注") }
         },
-        dismissButton = { TextButton(onClick = onDismiss, enabled = !isSaving) { Text("取消") } },
+        dismissButton = { CaibTextButton(onClick = onDismiss, enabled = !isSaving) { Text("取消") } },
     )
 }

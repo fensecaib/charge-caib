@@ -13,7 +13,7 @@ import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 import caib.charge.domain.model.CaibThemeMode
 
-private val LightColors = lightColorScheme(
+internal val LightColors = lightColorScheme(
     primary = CaibCyanDeep,
     onPrimary = CaibInk,
     primaryContainer = CaibCyanSoft,
@@ -52,55 +52,63 @@ private val LightColors = lightColorScheme(
     surfaceContainerLowest = CaibCard,
 )
 
-private val DarkColors = darkColorScheme(
-    primary = CaibCyan,
-    onPrimary = CaibInk,
-    primaryContainer = ColorTokens.darkCyanContainer,
+internal val DarkColors = darkColorScheme(
+    primary = QuietBlue.primary,
+    onPrimary = QuietBlue.onPrimary,
+    primaryContainer = QuietBlue.primaryContainer,
     onPrimaryContainer = CaibDarkText,
-    inversePrimary = CaibCyanDeep,
-    secondary = CaibCyanDeep,
-    onSecondary = CaibInk,
-    tertiary = CaibYellow,
-    onTertiary = CaibInk,
+    inversePrimary = QuietBlue.onPrimary,
+    secondary = QuietBlue.income,
+    onSecondary = QuietBlue.onIncome,
+    secondaryContainer = QuietBlue.incomeContainer,
+    onSecondaryContainer = CaibDarkText,
+    tertiary = QuietBlue.cta,
+    onTertiary = QuietBlue.onCta,
+    tertiaryContainer = QuietBlue.ctaContainer,
+    onTertiaryContainer = QuietBlue.onCtaContainer,
     background = CaibDarkBackground,
     onBackground = CaibDarkText,
     surface = CaibDarkSurface,
     onSurface = CaibDarkText,
     surfaceVariant = CaibDarkPanel,
     onSurfaceVariant = CaibDarkMuted,
-    surfaceTint = CaibCyan,
+    surfaceTint = QuietBlue.primary,
     inverseSurface = CaibDarkText,
     inverseOnSurface = CaibDarkBackground,
-    outline = CaibDarkMuted,
-    outlineVariant = ColorTokens.darkOutline,
-    error = ColorTokens.darkError,
-    onError = CaibInk,
-    errorContainer = ColorTokens.darkErrorContainer,
-    onErrorContainer = CaibDarkText,
+    outline = QuietBlue.boundary,
+    outlineVariant = QuietBlue.divider,
+    error = QuietBlue.error,
+    onError = QuietBlue.onError,
+    errorContainer = QuietBlue.errorContainer,
+    onErrorContainer = QuietBlue.onErrorContainer,
     scrim = Color.Black,
-    surfaceBright = ColorTokens.darkSurfaceBright,
+    surfaceBright = QuietBlue.surfaceHighest,
     surfaceDim = CaibDarkBackground,
     surfaceContainer = CaibDarkSurface,
-    surfaceContainerHigh = CaibDarkPanel,
-    surfaceContainerHighest = ColorTokens.darkSurfaceHighest,
-    surfaceContainerLow = ColorTokens.darkSurfaceLow,
-    surfaceContainerLowest = ColorTokens.darkSurfaceLowest,
+    surfaceContainerHigh = QuietBlue.surfaceHigh,
+    surfaceContainerHighest = QuietBlue.surfaceHighest,
+    surfaceContainerLow = QuietBlue.surfaceLow,
+    surfaceContainerLowest = CaibDarkBackground,
+    primaryFixed = QuietBlue.primary,
+    primaryFixedDim = QuietBlue.primary,
+    onPrimaryFixed = QuietBlue.onPrimary,
+    onPrimaryFixedVariant = QuietBlue.onPrimary,
+    secondaryFixed = QuietBlue.income,
+    secondaryFixedDim = QuietBlue.income,
+    onSecondaryFixed = QuietBlue.onIncome,
+    onSecondaryFixedVariant = QuietBlue.onIncome,
+    tertiaryFixed = QuietBlue.cta,
+    tertiaryFixedDim = QuietBlue.cta,
+    onTertiaryFixed = QuietBlue.onCta,
+    onTertiaryFixedVariant = QuietBlue.onCta,
 )
 
 private object ColorTokens {
     val yellowSoft = androidx.compose.ui.graphics.Color(0xFFFFF9E6)
-    val darkCyanContainer = androidx.compose.ui.graphics.Color(0xFF245463)
-    val darkOutline = androidx.compose.ui.graphics.Color(0x3DF1FAFD)
-    val darkError = androidx.compose.ui.graphics.Color(0xFFFFB4AB)
     val lightErrorContainer = Color(0xFFFFE9ED)
     val lightSurfaceDim = Color(0xFFDDEAF0)
     val lightSurfaceHigh = Color(0xFFF2F8FA)
     val lightSurfaceHighest = Color(0xFFEAF3F7)
-    val darkErrorContainer = Color(0xFF6B343B)
-    val darkSurfaceBright = Color(0xFF294956)
-    val darkSurfaceHighest = Color(0xFF2B4B58)
-    val darkSurfaceLow = Color(0xFF16303B)
-    val darkSurfaceLowest = Color(0xFF0C2029)
 }
 
 @Composable

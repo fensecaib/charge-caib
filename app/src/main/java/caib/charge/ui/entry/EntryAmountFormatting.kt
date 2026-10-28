@@ -1,10 +1,17 @@
 package caib.charge.ui.entry
 
 import caib.charge.domain.AmountError
+import caib.charge.ui.util.formatMoney
 import java.math.BigDecimal
 
 internal fun centsToExpression(cents: Long): String =
     BigDecimal(cents).movePointLeft(2).stripTrailingZeros().toPlainString()
+
+internal fun amountResultText(resultCents: Long?, error: AmountError?): String = when {
+    resultCents != null && error == null -> formatMoney(resultCents)
+    error != null && error != AmountError.EMPTY -> "待计算"
+    else -> "¥0.00"
+}
 
 internal fun amountErrorMessage(error: AmountError?): String = when (error) {
     null -> "金额有效，可完成保存"

@@ -13,7 +13,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.ScaffoldDefaults
-import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -43,6 +42,7 @@ import caib.charge.ui.chart.CategoryAnalysisScreen
 import caib.charge.ui.chart.ChartScreen
 import caib.charge.ui.chart.ChartViewModel
 import caib.charge.ui.components.EntryLaunchOverlay
+import caib.charge.ui.components.CaibSnackbarHost
 import caib.charge.ui.components.EntryReturnOverlay
 import caib.charge.ui.components.EntrySaveSuccessOverlay
 import caib.charge.ui.components.SakuBottomBar
@@ -51,6 +51,7 @@ import caib.charge.ui.components.SakuMonthPickerDialog
 import caib.charge.ui.components.rememberEntryReturnMotionState
 import caib.charge.ui.detail.DetailScreen
 import caib.charge.ui.discover.DiscoverScreen
+import caib.charge.ui.subscription.SubscriptionRoute
 import caib.charge.ui.entry.EntryEditorMode
 import caib.charge.ui.entry.EntryEditorScreen
 import caib.charge.ui.entry.QuickAmountEditorOverlay
@@ -78,6 +79,7 @@ import kotlinx.serialization.Serializable
 @Serializable data object ChartKey : NavKey
 @Serializable data object DiscoverKey : NavKey
 @Serializable data object ProfileKey : NavKey
+@Serializable data object SubscriptionsKey : NavKey
 
 @Serializable
 data class EntryEditorKey(
@@ -306,7 +308,12 @@ fun CaibApp(
             )
         }
         entry<DiscoverKey> {
-            DiscoverScreen()
+            DiscoverScreen(onSubscriptions = {
+                if (navigation.activeStack.lastOrNull() != SubscriptionsKey) navigation.push(SubscriptionsKey)
+            })
+        }
+        entry<SubscriptionsKey> {
+            SubscriptionRoute(onBack = { navigation.pop() })
         }
         entry<EntryEditorKey> { key ->
             val editorEntry by viewModel.editorEntry.collectAsStateWithLifecycle()
@@ -457,7 +464,7 @@ fun CaibApp(
         entryLaunchSession == null &&
         pendingEntrySaveMotion == null &&
         pendingEntryReturnMotion == null &&
-        fallbackBackKey !is EntryEditorKey
+        fallbackBackKey !is EntryEditorKey && fallbackBackKey != SubscriptionsKey
     ) {
         BackHandler {
             if (fallbackBackKey is CategoryAnalysisKey) chartViewModel.closeCategoryAnalysis()
@@ -484,7 +491,7 @@ fun CaibApp(
                 if (entryMotionActive) Modifier.semantics { hideFromAccessibility() } else Modifier
             ),
             snackbarHost = {
-                SnackbarHost(snackbar)
+                CaibSnackbarHost(snackbar)
                 if (!editing && !importantMessageVisible) {
                     saveConfirmation?.let { confirmation ->
                         EntrySaveSnackbar(confirmation, viewModel.entrySaveFeedback::dismiss)

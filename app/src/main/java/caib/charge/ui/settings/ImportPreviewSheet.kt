@@ -26,6 +26,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import caib.charge.ui.theme.expenseContentColor
 import androidx.compose.ui.unit.dp
 import caib.charge.ui.components.CaibCard
 import caib.charge.ui.components.CaibPrimaryButton
@@ -77,9 +78,9 @@ fun ImportPreviewSheet(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly
             ) {
-                PreviewMetric("可导入", counts.first, Color(0xFF2E8B65))
-                PreviewMetric("疑似重复", counts.second, MaterialTheme.colorScheme.tertiary)
-                PreviewMetric("无效", counts.third, MaterialTheme.colorScheme.error)
+                PreviewMetric("可导入", counts.first, MaterialTheme.colorScheme.onSurface)
+                PreviewMetric("疑似重复", counts.second, MaterialTheme.colorScheme.onSurface)
+                PreviewMetric("无效", counts.third, expenseContentColor())
             }
             LazyColumn(
                 modifier = Modifier.weight(1f),
@@ -116,8 +117,8 @@ fun ImportPreviewSheet(
                                     row.message,
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = when (row.status) {
-                                        UiImportStatus.INVALID -> MaterialTheme.colorScheme.error
-                                        UiImportStatus.DUPLICATE -> MaterialTheme.colorScheme.tertiary
+                                        UiImportStatus.INVALID -> expenseContentColor()
+                                        UiImportStatus.DUPLICATE -> MaterialTheme.colorScheme.onSurfaceVariant
                                         else -> MaterialTheme.colorScheme.onSurfaceVariant
                                     }
                                 )

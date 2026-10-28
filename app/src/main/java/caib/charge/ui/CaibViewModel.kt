@@ -318,11 +318,23 @@ class CaibViewModel @Inject constructor(
         }
     }
 
-    fun createCategory(type: UiEntryType, name: String, icon: String, color: Int) = launchAction("已创建分类") {
+    fun createCategory(
+        type: UiEntryType,
+        name: String,
+        icon: String,
+        color: Int,
+        onResult: (Result<Unit>) -> Unit,
+    ) = launchCategoryAction(onResult) {
         categoryRepository.createCustom(type.toDomain(), name, icon, color.toString())
     }
 
-    fun updateCategory(category: UiCategory, name: String, icon: String, color: Int) = launchAction("已更新分类") {
+    fun updateCategory(
+        category: UiCategory,
+        name: String,
+        icon: String,
+        color: Int,
+        onResult: (Result<Unit>) -> Unit,
+    ) = launchCategoryAction(onResult) {
         categoryRepository.updateCustom(category.id, name, icon, color.toString())
     }
 
@@ -330,7 +342,7 @@ class CaibViewModel @Inject constructor(
         categoryRepository.reorder(type.toDomain(), ids)
     }
 
-    fun archiveCategory(category: UiCategory) = launchAction("分类已归档") {
+    fun archiveCategory(category: UiCategory, onResult: (Result<Unit>) -> Unit) = launchCategoryAction(onResult) {
         categoryRepository.archive(category.id)
     }
 
@@ -415,6 +427,21 @@ class CaibViewModel @Inject constructor(
             message = row.message ?: if (row.mappedToOther) "未知分类已映射到其他" else "可导入",
             selected = row.includedByDefault
         )
+    }
+
+    private fun launchCategoryAction(onResult: (Result<Unit>) -> Unit, block: suspend () -> Unit) {
+        viewModelScope.launch {
+            val result = try {
+                block()
+                Result.success(Unit)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                Result.failure(error)
+            }
+            // The active modal owns its feedback and closes only after a successful write.
+            onResult(result)
+        }
     }
 
     private fun launchAction(success: String?, block: suspend () -> Unit) {
